@@ -1,1179 +1,1136 @@
-// NexusOS Pro — High-Precision Workspace Intelligence System Logic
+// ═══════════════════════════════════════════════════════════
+//  NexusOS Pro — App Logic v3.0
+//  Premium UI: smooth transitions, real data, clean state mgmt
+// ═══════════════════════════════════════════════════════════
 
-let state = {
+/* ─── App State ─── */
+const state = {
+  view: 'dashboard',
+  floor: 1,
   user: null,
-  availablePersonas: [],
-  currentFloor: 1,
-  activeView: 'dashboard',
-  selectedDesk: null,
-  selectedRoomId: null,
-  deptChartInstance: null,
-  latestDeptData: null
+  employees: [],
+  desks: [],
+  rooms: [],
+  visitors: [],
+  assets: [],
+  attendance: [],
+  deptChart: null,
+  cmdFocusIdx: 0,
+  badgeEmployee: null,
 };
 
-// ================= INITIALIZATION =================
+/* ─── Init ─── */
 document.addEventListener('DOMContentLoaded', async () => {
-  initTheme();
-  initSoundButton();
   initClock();
+  initTheme();
+  initNavigation();
   initCommandPalette();
-  initEventListeners();
-  await loadCurrentUser();
-  await loadView(state.activeView);
+  initPersonaToggle();
+  initTopbarActions();
+  await bootstrap();
 });
 
-// Precision Real-time Clock
+async function bootstrap() {
+  try {
+    const [emps, desks, rooms, visitors, assets, att] = await Promise.all([
+      api.get('/employees'),
+      api.get('/desks'),
+      api.get('/rooms'),
+      api.get('/visitors'),
+      api.get('/assets'),
+      api.get('/attendance'),
+    ]);
+    state.employees  = emps    || [];
+    state.desks      = desks   || [];
+    state.rooms      = rooms   || [];
+    state.visitors   = visitors|| [];
+    state.assets     = assets  || [];
+    state.attendance = att     || [];
+
+    // Set default user
+    state.user = state.employees[0] || { name: 'Admin', role: 'System Admin', avatar: '' };
+    renderUserChip();
+    renderPersonaList();
+    populateEmployeeDropdowns();
+
+    // Render initial view
+    renderView(state.view);
+
+    // Update nav badge
+    updateDeskBadge();
+  } catch(e) {
+    showToast('Failed to connect to backend API', 'error');
+    console.error(e);
+  }
+}
+
+/* ─── Clock ─── */
 function initClock() {
-  const clockEl = document.getElementById('live-clock');
-  function update() {
+  const el = document.getElementById('live-clock');
+  function tick() {
     const now = new Date();
-    if (clockEl) {
-      clockEl.innerHTML = `<i class="fa-regular fa-clock mr-1 text-cyan-400"></i>${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })} IST`;
-    }
+    const time = now.toLocaleTimeString('en-IN', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+    if (el) el.textContent = `${time} IST`;
   }
-  update();
-  setInterval(update, 1000);
+  tick();
+  setInterval(tick, 1000);
 }
 
-// Obsidian Dark / Light Theme
-function initTheme() {
-  const saved = localStorage.getItem('nexus_theme');
-  if (saved === 'light') {
-    document.documentElement.classList.remove('dark');
-  } else {
-    document.documentElement.classList.add('dark');
-  }
-
-  document.getElementById('btn-dark-toggle')?.addEventListener('click', () => {
-    window.sound?.playClick();
-    const isDark = document.documentElement.classList.toggle('dark');
-    localStorage.setItem('nexus_theme', isDark ? 'dark' : 'light');
-    if (state.deptChartInstance && state.latestDeptData) {
-      renderDeptChart(state.latestDeptData);
-    }
-  });
-}
-
-// Sound FX Controller
-function initSoundButton() {
-  const btn = document.getElementById('btn-sound-toggle');
-  const icon = document.getElementById('icon-sound');
-  function updateIcon() {
-    if (!icon) return;
-    const isEnabled = window.sound?.enabled;
-    if (isEnabled) {
-      icon.className = 'fa-solid fa-volume-high text-xs text-cyan-400';
-    } else {
-      icon.className = 'fa-solid fa-volume-xmark text-xs text-slate-500';
-    }
-  }
-
-  updateIcon();
-  btn?.addEventListener('click', () => {
-    const enabled = window.sound?.toggle();
-    updateIcon();
-    showToast(`Synthesizer Audio ${enabled ? 'Enabled' : 'Muted'}`, 'info');
-  });
-}
-
-// Global Event Listeners
-function initEventListeners() {
-  // Navigation Sidebar
-  document.querySelectorAll('.nav-item').forEach(btn => {
+/* ─── Navigation ─── */
+function initNavigation() {
+  document.querySelectorAll('.nav-item[data-view]').forEach(btn => {
     btn.addEventListener('click', () => {
-      window.sound?.playClick();
       const view = btn.dataset.view;
-      navigateToView(view);
+      navigateTo(view);
+      window.sound?.click();
     });
   });
+}
 
-  // Persona Menu Dropdown
-  const personaBtn = document.getElementById('btn-persona-dropdown');
-  const personaMenu = document.getElementById('persona-menu');
-  if (personaBtn && personaMenu) {
-    personaBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      window.sound?.playClick();
-      personaMenu.classList.toggle('hidden');
-    });
-    document.addEventListener('click', () => personaMenu.classList.add('hidden'));
-  }
-
-  // Quick Attendance
-  document.getElementById('btn-quick-attendance')?.addEventListener('click', handleAttendanceAction);
-
-  // Reset Demo Database
-  document.getElementById('btn-reset-db')?.addEventListener('click', async () => {
-    window.sound?.playWarning();
-    if (confirm('Reset platform data back to initial architectural seed state?')) {
-      try {
-        await API.resetDatabase();
-        if (typeof confetti === 'function') confetti();
-        window.sound?.playSuccess();
-        showToast('Database reset to default seed data!', 'success');
-        await loadCurrentUser();
-        await loadView(state.activeView);
-      } catch (err) {
-        showToast(err.message, 'error');
-      }
-    }
+function navigateTo(view) {
+  // Update active nav item
+  document.querySelectorAll('.nav-item[data-view]').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.view === view);
   });
 
-  // Employee search and filters
-  document.getElementById('input-employee-search')?.addEventListener('input', debounce(loadEmployees, 300));
-  document.getElementById('select-dept-filter')?.addEventListener('change', () => { window.sound?.playClick(); loadEmployees(); });
-  document.getElementById('select-status-filter')?.addEventListener('change', () => { window.sound?.playClick(); loadEmployees(); });
-
-  // Confirmation actions
-  document.getElementById('btn-confirm-desk-booking')?.addEventListener('click', confirmDeskBooking);
-  document.getElementById('btn-confirm-room-booking')?.addEventListener('click', confirmRoomBooking);
-}
-
-// Animated Numerical Counter
-function animateCounter(el, target, suffix = '', duration = 750) {
-  if (!el) return;
-  const start = 0;
-  const startTime = performance.now();
-
-  function step(currentTime) {
-    const elapsed = currentTime - startTime;
-    const progress = Math.min(elapsed / duration, 1);
-    const ease = 1 - Math.pow(1 - progress, 4);
-    const currentVal = Math.floor(start + (target - start) * ease);
-
-    el.innerText = `${currentVal}${suffix}`;
-    if (progress < 1) {
-      requestAnimationFrame(step);
-    } else {
-      el.innerText = `${target}${suffix}`;
-    }
-  }
-
-  requestAnimationFrame(step);
-}
-
-// ================= COMMAND PALETTE (CTRL+K) =================
-const COMMANDS = [
-  { title: 'Overview Telemetry', desc: 'Real-time telemetry and metrics', icon: 'fa-chart-simple', action: () => navigateToView('dashboard') },
-  { title: 'Level 01 CAD Blueprint', desc: 'Inspect & book Level 01 Engineering workstations', icon: 'fa-layer-group', action: () => { navigateToView('desks'); switchFloor(1); } },
-  { title: 'Level 02 CAD Blueprint', desc: 'Inspect & book Level 02 Executive & Operations pods', icon: 'fa-layer-group', action: () => { navigateToView('desks'); switchFloor(2); } },
-  { title: 'Conference Pods', desc: 'Reserve rooms and inspect live schedules', icon: 'fa-door-open', action: () => navigateToView('rooms') },
-  { title: 'Personnel Directory', desc: 'Staff directory with filters and contact cards', icon: 'fa-id-card-clip', action: () => navigateToView('employees') },
-  { title: 'Clock Shift In / Out', desc: 'Timestamp your active presence on campus', icon: 'fa-fingerprint', action: handleAttendanceAction },
-  { title: 'Issue Visitor Clearance', desc: 'Generate NFC & QR code visitor badge', icon: 'fa-id-card', action: () => openModal('modal-add-visitor') },
-  { title: 'Onboard Staff Member', desc: 'Add new profile to directory', icon: 'fa-user-plus', action: () => openModal('modal-add-employee') },
-  { title: 'Hardware Inventory', desc: 'Track MacBooks, 4K Displays & equipment', icon: 'fa-server', action: () => navigateToView('assets') },
-  { title: 'Toggle Theme', desc: 'Switch Dark/Light visual mode', icon: 'fa-moon', action: () => document.getElementById('btn-dark-toggle')?.click() },
-  { title: 'Restore Seed Data', desc: 'Wipe and reload clean demo records', icon: 'fa-arrows-rotate', action: () => document.getElementById('btn-reset-db')?.click() }
-];
-
-function initCommandPalette() {
-  window.addEventListener('keydown', (e) => {
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
-      e.preventDefault();
-      openCommandPalette();
-    }
-    if (e.key === 'Escape') {
-      closeCommandPalette();
-    }
-  });
-
-  const input = document.getElementById('input-command-palette');
-  input?.addEventListener('input', (e) => renderCommandResults(e.target.value));
-}
-
-window.openCommandPalette = function () {
-  window.sound?.playPop();
-  const modal = document.getElementById('modal-command-palette');
-  const input = document.getElementById('input-command-palette');
-  if (modal && input) {
-    modal.classList.remove('hidden');
-    input.value = '';
-    renderCommandResults('');
-    input.focus();
-  }
-};
-
-window.closeCommandPalette = function () {
-  document.getElementById('modal-command-palette')?.classList.add('hidden');
-};
-
-function renderCommandResults(query = '') {
-  const container = document.getElementById('command-palette-results');
-  if (!container) return;
-
-  const q = query.toLowerCase().trim();
-  const filtered = COMMANDS.filter(c => c.title.toLowerCase().includes(q) || c.desc.toLowerCase().includes(q));
-
-  if (filtered.length === 0) {
-    container.innerHTML = `
-      <div class="py-6 text-center text-slate-500 font-mono text-xs">
-        No matching system commands found.
-      </div>
-    `;
-    return;
-  }
-
-  container.innerHTML = filtered.map((c, idx) => `
-    <button onclick="executeCommand(${COMMANDS.indexOf(c)})" class="w-full flex items-center gap-3 p-2.5 rounded-xl hover:bg-white/5 text-left transition-colors group">
-      <div class="w-7 h-7 rounded-lg bg-cyan-500/10 text-cyan-400 flex items-center justify-center text-xs">
-        <i class="fa-solid ${c.icon}"></i>
-      </div>
-      <div class="flex-1">
-        <div class="font-bold text-white text-xs">${c.title}</div>
-        <div class="text-[10px] text-slate-400">${c.desc}</div>
-      </div>
-      <i class="fa-solid fa-chevron-right text-[10px] text-slate-500 group-hover:text-cyan-400 transition-colors"></i>
-    </button>
-  `).join('');
-}
-
-window.executeCommand = function (index) {
-  closeCommandPalette();
-  const cmd = COMMANDS[index];
-  if (cmd && cmd.action) {
-    cmd.action();
-  }
-};
-
-// ================= PERSONAS & CURRENT USER =================
-async function loadCurrentUser() {
-  try {
-    const res = await API.getMe();
-    state.user = res.data.user;
-    state.availablePersonas = res.data.availablePersonas;
-
-    document.getElementById('current-user-name').innerText = state.user.name;
-    document.getElementById('current-user-role').innerText = state.user.role;
-    document.getElementById('current-user-avatar').src = state.user.avatar;
-
-    const listEl = document.getElementById('persona-list');
-    if (listEl) {
-      listEl.innerHTML = state.availablePersonas.map(p => `
-        <button onclick="switchUserPersona('${p.id}')" class="w-full flex items-center gap-3 px-3 py-2 hover:bg-white/5 text-left transition-colors ${p.id === state.user.id ? 'bg-cyan-500/10 font-bold' : ''}">
-          <img src="${p.avatar}" class="w-7 h-7 rounded-lg object-cover">
-          <div class="truncate">
-            <div class="text-xs text-white">${p.name}</div>
-            <div class="text-[10px] text-slate-400 font-mono">${p.role}</div>
-          </div>
-          ${p.id === state.user.id ? '<i class="fa-solid fa-check text-cyan-400 text-xs ml-auto"></i>' : ''}
-        </button>
-      `).join('');
-    }
-
-    const hostSelect = document.getElementById('vis-host');
-    if (hostSelect) {
-      hostSelect.innerHTML = state.availablePersonas.map(p => `
-        <option value="${p.name}">${p.name} (${p.department})</option>
-      `).join('');
-    }
-
-  } catch (err) {
-    console.error('Failed to load user persona:', err);
-  }
-}
-
-window.switchUserPersona = async function (id) {
-  window.sound?.playClick();
-  API.setUserId(id);
-  await loadCurrentUser();
-  showToast(`Active Persona switched to ${state.user.name}`, 'info');
-  await loadView(state.activeView);
-};
-
-// ================= NAVIGATION =================
-window.navigateToView = async function (viewName) {
-  state.activeView = viewName;
-
-  document.querySelectorAll('.nav-item').forEach(btn => {
-    if (btn.dataset.view === viewName) {
-      btn.className = 'nav-item w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-bold transition-all text-cyan-400 bg-cyan-500/10 border border-cyan-500/20 shadow-sm';
-    } else {
-      btn.className = 'nav-item w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-medium transition-all text-slate-400 hover:bg-white/5 hover:text-white';
-    }
-  });
-
-  document.querySelectorAll('main > section').forEach(sec => sec.classList.add('hidden'));
-
-  const target = document.getElementById(`view-${viewName}`);
-  if (target) {
-    target.classList.remove('hidden');
-  }
-
+  // Update page title
   const titles = {
-    dashboard: 'Overview Telemetry',
-    desks: 'CAD Floor Blueprint & Workstation Grid',
-    rooms: 'Conference Pods & AV Systems',
-    employees: 'Personnel Directory & Roster',
-    attendance: 'Shift Logging & Clearances',
-    visitors: 'Campus Security & Visitor Pass',
-    assets: 'Hardware & Peripheral Inventory'
+    dashboard:  ['Overview', 'Real-time workspace telemetry'],
+    desks:      ['Floor Plan', 'Smart desk booking & occupancy'],
+    rooms:      ['Meeting Rooms', 'Conference pod reservations'],
+    employees:  ['Personnel', 'Team directory & management'],
+    attendance: ['Attendance', 'Clock-in · leave management'],
+    visitors:   ['Visitors & Badges', 'Visitor registration & secure passes'],
+    assets:     ['IT Assets', 'Hardware inventory & assignments'],
   };
-  document.getElementById('current-view-title').innerText = titles[viewName] || 'Dashboard';
 
-  await loadView(viewName);
-};
+  const [title, sub] = titles[view] || ['NexusOS', ''];
+  document.getElementById('page-title').textContent = title;
 
-async function loadView(viewName) {
-  switch (viewName) {
-    case 'dashboard':
-      await loadDashboard();
-      break;
-    case 'desks':
-      await loadDesks(state.currentFloor);
-      break;
-    case 'rooms':
-      await loadRooms();
-      break;
-    case 'employees':
-      await loadEmployees();
-      break;
-    case 'attendance':
-      await loadAttendance();
-      break;
-    case 'visitors':
-      await loadVisitors();
-      break;
-    case 'assets':
-      await loadAssets();
-      break;
+  // Switch view sections
+  document.querySelectorAll('.view').forEach(s => s.classList.remove('active'));
+  const section = document.getElementById(`view-${view}`);
+  if (section) section.classList.add('active');
+
+  state.view = view;
+  renderView(view);
+}
+
+function renderView(view) {
+  switch(view) {
+    case 'dashboard':  renderDashboard();  break;
+    case 'desks':      renderDesks();      break;
+    case 'rooms':      renderRooms();      break;
+    case 'employees':  renderEmployees();  break;
+    case 'attendance': renderAttendance(); break;
+    case 'visitors':   renderVisitors();   break;
+    case 'assets':     renderAssets();     break;
   }
 }
 
-// ================= 1. DASHBOARD =================
-async function loadDashboard() {
-  try {
-    const res = await API.getDashboard();
-    const { metrics, departments, announcements, recentActivity } = res.data;
+/* ─── Dashboard ─── */
+function renderDashboard() {
+  const onsite   = state.attendance.filter(a => a.status === 'in-office').length;
+  const remote   = state.attendance.filter(a => a.status === 'remote').length;
+  const occupied = state.desks.filter(d => d.status === 'occupied').length;
+  const total    = state.desks.length || 1;
+  const booked   = state.rooms.filter(r => r.status === 'booked').length;
+  const pct      = Math.round((occupied / total) * 100);
 
-    animateCounter(document.getElementById('stat-total-employees'), metrics.totalEmployees);
-    animateCounter(document.getElementById('stat-in-office'), metrics.inOfficeToday);
-    document.getElementById('stat-remote-sub').innerText = `${metrics.remoteToday} Remote`;
-    animateCounter(document.getElementById('stat-desk-rate'), metrics.deskOccupancyRate, '%');
-    document.getElementById('stat-desk-count').innerText = `${metrics.occupiedDesks} / ${metrics.totalDesks} Desks`;
-    document.getElementById('stat-desk-progress').style.width = `${metrics.deskOccupancyRate}%`;
-    animateCounter(document.getElementById('stat-booked-rooms'), metrics.bookedRooms);
+  setText('stat-employees', state.employees.length);
+  setText('stat-onsite',   onsite);
+  setText('stat-remote',   `${remote} Remote`);
+  setText('stat-desk-pct', `${pct}%`);
+  setText('stat-desk-sub', `${occupied} / ${total} desks occupied`);
+  setText('stat-rooms',    booked);
 
-    const availBadge = document.getElementById('badge-available-desks');
-    if (availBadge) availBadge.innerText = `${metrics.availableDesks} Free`;
+  document.getElementById('stat-desk-bar').style.width = `${pct}%`;
 
-    // Campus Notices
-    const annEl = document.getElementById('dashboard-announcements');
-    annEl.innerHTML = announcements.map(a => `
-      <div class="p-3 rounded-xl bg-slate-50 dark:bg-obsidian-850 border border-slate-200 dark:border-white/5">
-        <div class="flex items-center justify-between text-[10px] font-mono mb-1">
-          <span class="text-cyan-400 font-bold">${a.category}</span>
-          <span class="text-slate-500">${a.date}</span>
-        </div>
-        <div class="font-bold text-xs text-white leading-snug">${a.title}</div>
-        <p class="text-[11px] text-slate-400 mt-1 leading-relaxed">${a.content}</p>
-      </div>
-    `).join('');
-
-    // Telemetry Activity Feed
-    const actEl = document.getElementById('dashboard-activity');
-    actEl.innerHTML = recentActivity.map(act => `
-      <div class="flex items-center gap-2.5 font-mono text-[11px]">
-        <span class="w-1.5 h-1.5 rounded-full bg-cyan-400"></span>
-        <span class="flex-1 truncate text-slate-300">${act.text}</span>
-        <span class="text-[10px] text-slate-500 whitespace-nowrap">${act.time}</span>
-      </div>
-    `).join('');
-
-    state.latestDeptData = departments;
-    renderDeptChart(departments);
-
-  } catch (err) {
-    console.error('Failed to load dashboard:', err);
-  }
+  renderDeptChart();
+  renderAccessLog();
 }
 
-function renderDeptChart(departments) {
-  const canvas = document.getElementById('deptChart');
-  if (!canvas) return;
+function renderDeptChart() {
+  const depts = {};
+  state.employees.forEach(e => {
+    const d = e.department || 'Unknown';
+    depts[d] = (depts[d] || 0) + 1;
+  });
 
-  if (state.deptChartInstance) {
-    state.deptChartInstance.destroy();
-  }
+  const labels = Object.keys(depts);
+  const data   = Object.values(depts);
 
-  const isDark = document.documentElement.classList.contains('dark');
-  const labels = Object.keys(departments);
-  const data = Object.values(departments);
+  const palette = [
+    'rgba(34,211,238,0.8)',
+    'rgba(129,140,248,0.8)',
+    'rgba(52,211,153,0.8)',
+    'rgba(251,191,36,0.8)',
+    'rgba(251,113,133,0.8)',
+    'rgba(167,139,250,0.8)',
+    'rgba(99,102,241,0.8)',
+    'rgba(244,114,182,0.8)',
+  ];
 
-  state.deptChartInstance = new Chart(canvas, {
+  const ctx = document.getElementById('dept-chart');
+  if (!ctx) return;
+
+  if (state.deptChart) { state.deptChart.destroy(); }
+
+  state.deptChart = new Chart(ctx, {
     type: 'bar',
     data: {
       labels,
       datasets: [{
-        label: 'Personnel Headcount',
         data,
-        backgroundColor: [
-          '#06b6d4', '#3b82f6', '#10b981', '#f59e0b', '#ec4899', '#8b5cf6'
-        ],
-        borderRadius: 8,
-        borderSkipped: false
+        backgroundColor: palette.slice(0, labels.length),
+        borderColor: 'transparent',
+        borderRadius: 7,
+        borderSkipped: false,
       }]
     },
     options: {
-      responsive: true,
-      maintainAspectRatio: false,
+      responsive: true, maintainAspectRatio: false,
       plugins: {
-        legend: { display: false }
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: 'rgba(13,20,37,0.95)',
+          borderColor: 'rgba(255,255,255,0.08)',
+          borderWidth: 1,
+          titleColor: 'rgba(255,255,255,0.6)',
+          bodyColor: 'rgba(255,255,255,0.9)',
+          padding: 10,
+          callbacks: {
+            label: ctx => ` ${ctx.raw} member${ctx.raw === 1 ? '' : 's'}`,
+          }
+        }
       },
       scales: {
         x: {
-          grid: { display: false },
-          ticks: { color: isDark ? '#64748b' : '#64748b', font: { family: 'JetBrains Mono', size: 10 } }
+          grid: { color: 'rgba(255,255,255,0.04)' },
+          ticks: { color: 'rgba(255,255,255,0.3)', font: { size: 10, family: 'JetBrains Mono' } },
+          border: { color: 'rgba(255,255,255,0.06)' },
         },
         y: {
+          grid: { color: 'rgba(255,255,255,0.04)' },
+          ticks: { color: 'rgba(255,255,255,0.3)', font: { size: 10, family: 'JetBrains Mono' }, stepSize: 1 },
+          border: { color: 'rgba(255,255,255,0.06)' },
           beginAtZero: true,
-          grid: { color: isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)' },
-          ticks: { stepSize: 1, color: isDark ? '#64748b' : '#64748b', font: { family: 'JetBrains Mono', size: 10 } }
         }
-      }
+      },
+      animation: { duration: 600, easing: 'easeOutQuart' },
     }
   });
 }
 
-// ================= 2. ARCHITECTURAL CAD DESK GRID =================
-window.switchFloor = function (floorNum) {
-  window.sound?.playClick();
-  state.currentFloor = floorNum;
-  
-  const f1 = document.getElementById('tab-floor-1');
-  const f2 = document.getElementById('tab-floor-2');
-  if (floorNum === 1) {
-    f1.className = 'px-4 py-1.5 rounded-lg text-xs font-mono font-bold transition-all bg-cyan-500 text-white shadow-sm';
-    f2.className = 'px-4 py-1.5 rounded-lg text-xs font-mono font-bold transition-all text-slate-400 hover:text-white';
-    document.getElementById('floor-title').innerText = 'LEVEL 01: Engineering & UX Wing';
-  } else {
-    f2.className = 'px-4 py-1.5 rounded-lg text-xs font-mono font-bold transition-all bg-cyan-500 text-white shadow-sm';
-    f1.className = 'px-4 py-1.5 rounded-lg text-xs font-mono font-bold transition-all text-slate-400 hover:text-white';
-    document.getElementById('floor-title').innerText = 'LEVEL 02: Executive & Operations Wing';
-  }
+function renderAccessLog() {
+  const el = document.getElementById('access-log');
+  if (!el) return;
 
-  loadDesks(floorNum);
-};
+  const events = [
+    { name: 'Alice Chen',       action: 'clocked in',       time: '2m ago',  color: 'var(--emerald)' },
+    { name: 'Desks Floor 01',   action: '3 new bookings',   time: '8m ago',  color: 'var(--cyan)' },
+    { name: 'Ravi Sharma',      action: 'visitor registered',time: '15m ago', color: 'var(--indigo)' },
+    { name: 'Board Room A',     action: 'reserved until 15:00', time: '22m ago', color: 'var(--amber)' },
+    { name: 'Marcus Lee',       action: 'clocked out',      time: '41m ago', color: 'var(--rose)' },
+  ];
 
-async function loadDesks(floor = 1) {
-  try {
-    const res = await API.getDesks(floor);
-    const container = document.getElementById('desks-container');
-    if (!container) return;
+  // Merge real attendance data
+  const live = state.attendance.slice(-3).reverse().map(a => {
+    const emp = state.employees.find(e => e.id === a.employeeId);
+    return { name: emp?.name || 'Unknown', action: a.status, time: formatRelative(a.date), color: 'var(--cyan)' };
+  });
 
-    container.innerHTML = res.data.map(desk => {
-      const isAvailable = desk.status === 'Available';
-      const isOccupied = desk.status === 'Occupied';
-      const isReserved = desk.status === 'Reserved';
-      const isMine = desk.bookedEmail === state.user.email;
+  const all = [...live, ...events].slice(0, 6);
 
-      let statusClass = 'status-available';
-      let dotColor = 'bg-emerald-500';
-      if (isOccupied) { statusClass = 'status-occupied'; dotColor = 'bg-rose-500'; }
-      if (isReserved) { statusClass = 'status-reserved'; dotColor = 'bg-indigo-500'; }
-      if (desk.status === 'Under Maintenance') { statusClass = 'status-maintenance'; dotColor = 'bg-amber-500'; }
-
-      return `
-        <div onclick="handleDeskClick('${desk.id}')" class="workstation-pod ${statusClass}">
-          <div class="flex items-center justify-between mb-2">
-            <span class="font-mono font-bold text-xs text-white">${desk.id}</span>
-            <span class="w-2 h-2 rounded-full ${dotColor} ${isAvailable ? 'radar-beacon' : ''}"></span>
-          </div>
-
-          <!-- Top-down CAD Desk Drawing Representation -->
-          <div class="my-3 py-2 px-3 rounded-lg bg-black/20 border border-white/5 flex items-center justify-between">
-            <div class="text-[11px] font-mono text-slate-300 truncate">${desk.type}</div>
-            <i class="fa-solid fa-display text-slate-400 text-xs"></i>
-          </div>
-
-          <div class="text-[10px] font-mono text-slate-500 uppercase tracking-wider truncate mb-1">
-            ${desk.section}
-          </div>
-
-          ${desk.bookedBy ? `
-            <div class="text-[11px] font-mono font-bold text-white truncate flex items-center gap-1.5">
-              <i class="fa-solid fa-user-check text-cyan-400 text-[10px]"></i>
-              <span class="truncate">${isMine ? 'You' : desk.bookedBy}</span>
-            </div>
-          ` : `
-            <div class="text-[10px] font-mono font-bold text-emerald-400 flex items-center gap-1">
-              <i class="fa-solid fa-plus text-[10px]"></i> Free to Book
-            </div>
-          `}
-        </div>
-      `;
-    }).join('');
-
-  } catch (err) {
-    console.error('Failed to load desks:', err);
-  }
+  el.innerHTML = all.map(e => `
+    <div class="activity-item">
+      <span class="activity-dot" style="background:${e.color}"></span>
+      <div>
+        <div class="activity-text"><strong style="color:rgba(255,255,255,0.8)">${e.name}</strong> ${e.action}</div>
+        <div class="activity-time">${e.time}</div>
+      </div>
+    </div>
+  `).join('');
 }
 
-window.handleDeskClick = async function (deskId) {
-  try {
-    const res = await API.getDesks();
-    const desk = res.data.find(d => d.id === deskId);
-    if (!desk) return;
+/* ─── Desks / Floor Plan ─── */
+function renderDesks() {
+  const map = document.getElementById('floor-map');
+  if (!map) return;
 
-    state.selectedDesk = desk;
+  const floorDesks = state.desks.filter(d => (d.floor || 1) === state.floor);
 
-    if (desk.bookedEmail === state.user.email) {
-      window.sound?.playWarning();
-      if (confirm(`You currently have ${desk.id} allocated. Release workstation?`)) {
-        await API.releaseDesk(desk.id);
-        window.sound?.playSuccess();
-        showToast(`${desk.id} released to pool`, 'info');
-        await loadDesks(state.currentFloor);
-        await loadDashboard();
-      }
-      return;
-    }
-
-    if (desk.status !== 'Available') {
-      window.sound?.playWarning();
-      showToast(`${desk.id} is occupied by ${desk.bookedBy || 'another staff member'}.`, 'warning');
-      return;
-    }
-
-    window.sound?.playPop();
-    document.getElementById('modal-desk-id').innerText = desk.id;
-    document.getElementById('modal-desk-type').innerText = desk.type;
-    document.getElementById('modal-desk-section').innerText = desk.section;
-    document.getElementById('modal-desk-floor').innerText = `Level 0${desk.floor}`;
-    document.getElementById('input-desk-booked-by').value = `${state.user.name} (${state.user.email})`;
-
-    openModal('modal-book-desk');
-  } catch (err) {
-    showToast(err.message, 'error');
-  }
-};
-
-async function confirmDeskBooking() {
-  if (!state.selectedDesk) return;
-  try {
-    const res = await API.bookDesk(state.selectedDesk.id, {
-      bookedBy: state.user.name,
-      bookedEmail: state.user.email
-    });
-
-    closeModal('modal-book-desk');
-    window.sound?.playSuccess();
-    if (typeof confetti === 'function') confetti();
-    showToast(res.message, 'success');
-    await loadDesks(state.currentFloor);
-    await loadDashboard();
-  } catch (err) {
-    showToast(err.message, 'error');
-  }
-}
-
-// ================= 3. CONFERENCE PODS & TIMELINES =================
-async function loadRooms() {
-  try {
-    const res = await API.getRooms();
-    const container = document.getElementById('rooms-container');
-    if (!container) return;
-
-    container.innerHTML = res.data.map(room => {
-      const isBooked = room.status === 'Booked';
-
-      return `
-        <div class="pro-card p-6 flex flex-col justify-between">
-          <div>
-            <div class="flex items-center justify-between mb-3 font-mono">
-              <span class="text-[10px] text-slate-500 uppercase">Level 0${room.floor}</span>
-              <span class="status-pill ${isBooked ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'}">
-                <span class="w-1.5 h-1.5 rounded-full ${isBooked ? 'bg-amber-400' : 'bg-emerald-400'}"></span>
-                ${room.status}
-              </span>
-            </div>
-
-            <h4 class="font-extrabold text-base text-white tracking-tight">${room.name}</h4>
-            <div class="text-xs font-mono text-slate-400 mt-1 flex items-center gap-2">
-              <i class="fa-solid fa-users text-cyan-500"></i> Max Capacity: ${room.capacity} Engineers
-            </div>
-
-            <!-- AV Hardware Badges -->
-            <div class="flex flex-wrap gap-1.5 my-3.5">
-              ${room.amenities.map(a => `
-                <span class="px-2 py-0.5 rounded-md bg-white/5 border border-white/5 text-[10px] font-mono text-slate-300">${a}</span>
-              `).join('')}
-            </div>
-
-            <!-- Visual 9 AM - 6 PM Schedule Occupancy Bar -->
-            <div class="my-3 font-mono text-[10px]">
-              <div class="flex justify-between text-slate-500 mb-1">
-                <span>09:00</span>
-                <span>13:00</span>
-                <span>18:00</span>
-              </div>
-              <div class="w-full h-2 rounded-full bg-white/5 flex overflow-hidden border border-white/5">
-                <div class="h-full bg-emerald-500/40" style="width: 35%"></div>
-                <div class="h-full ${isBooked ? 'bg-amber-500' : 'bg-emerald-500/40'}" style="width: 35%"></div>
-                <div class="h-full bg-emerald-500/40" style="width: 30%"></div>
-              </div>
-            </div>
-
-            <!-- Booking Info -->
-            ${isBooked && room.currentBooking ? `
-              <div class="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs font-mono my-3">
-                <div class="font-bold text-amber-300 truncate">${room.currentBooking.title}</div>
-                <div class="text-[10px] text-amber-400 mt-0.5">
-                  ${room.currentBooking.startTime} - ${room.currentBooking.endTime} • Lead: ${room.currentBooking.bookedBy}
-                </div>
-              </div>
-            ` : `
-              <div class="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-xs font-mono text-emerald-400 my-3 flex items-center gap-2">
-                <i class="fa-regular fa-clock"></i> Open for reservation
-              </div>
-            `}
-          </div>
-
-          <div class="mt-2 font-mono">
-            ${isBooked ? `
-              <button onclick="cancelRoomBooking('${room.id}')" class="w-full py-2 rounded-xl text-xs font-bold bg-white/5 hover:bg-white/10 text-rose-400 transition-colors">
-                Free Up Pod
-              </button>
-            ` : `
-              <button onclick="openRoomBookingModal('${room.id}', '${room.name}')" class="w-full py-2.5 rounded-xl text-xs font-bold bg-cyan-500 hover:bg-cyan-600 text-white shadow-md shadow-cyan-500/20 transition-all">
-                Reserve Pod
-              </button>
-            `}
-          </div>
-        </div>
-      `;
-    }).join('');
-
-  } catch (err) {
-    console.error('Failed to load rooms:', err);
-  }
-}
-
-window.openRoomBookingModal = function (roomId, roomName) {
-  window.sound?.playPop();
-  state.selectedRoomId = roomId;
-  document.getElementById('modal-room-name').innerText = roomName;
-  document.getElementById('input-room-organizer').value = state.user.name;
-  openModal('modal-book-room');
-};
-
-async function confirmRoomBooking() {
-  const title = document.getElementById('input-room-title').value.trim();
-  const startTime = document.getElementById('input-room-start').value;
-  const endTime = document.getElementById('input-room-end').value;
-
-  if (!title) {
-    window.sound?.playWarning();
-    showToast('Enter session title', 'warning');
+  if (!floorDesks.length) {
+    map.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:60px;color:rgba(255,255,255,0.25);font-family:var(--font-mono);font-size:12px">No desks configured for this floor. <a href="#" onclick="event.preventDefault();api.post('/seed').then(()=>location.reload())" style="color:var(--cyan)">Seed demo data</a></div>`;
     return;
   }
 
-  try {
-    const res = await API.bookRoom(state.selectedRoomId, {
-      title,
-      startTime,
-      endTime,
-      bookedBy: state.user.name
+  // Group desks by zone/section
+  const zones = {};
+  floorDesks.forEach(d => {
+    const zone = d.section || d.zone || (d.deskId?.startsWith('E') ? 'Engineering' : d.deskId?.startsWith('P') ? 'Product' : 'General');
+    if (!zones[zone]) zones[zone] = [];
+    zones[zone].push(d);
+  });
+
+  let html = '';
+  for (const [zone, desks] of Object.entries(zones)) {
+    html += `<div class="desk-row-header"><i class="fa-solid fa-location-dot" style="color:rgba(255,255,255,0.3)"></i>${zone}</div>`;
+    desks.forEach(d => {
+      const occupant = state.employees.find(e => e.deskId === d.id || e.id === d.occupantId);
+      const status   = d.status || 'available';
+      html += `
+        <div class="desk-pod ${status}" onclick="openDeskModal('${d.id}')">
+          <div style="display:flex;align-items:center;justify-content:space-between">
+            <div class="desk-id">${d.deskId || d.id}</div>
+            <span class="desk-status-dot"></span>
+          </div>
+          <div class="desk-occupant">${occupant?.name || (status === 'available' ? 'Available' : status === 'maintenance' ? 'Maintenance' : 'Reserved')}</div>
+          <div class="desk-dept">${occupant?.department || d.equipment || ''}</div>
+        </div>
+      `;
     });
-
-    closeModal('modal-book-room');
-    window.sound?.playSuccess();
-    if (typeof confetti === 'function') confetti();
-    showToast(res.message, 'success');
-    await loadRooms();
-    await loadDashboard();
-  } catch (err) {
-    showToast(err.message, 'error');
   }
+
+  map.innerHTML = html;
 }
 
-window.cancelRoomBooking = async function (roomId) {
-  window.sound?.playWarning();
-  if (confirm('Release conference room reservation?')) {
-    try {
-      const res = await API.cancelRoom(roomId);
-      window.sound?.playClick();
-      showToast(res.message, 'info');
-      await loadRooms();
-      await loadDashboard();
-    } catch (err) {
-      showToast(err.message, 'error');
-    }
-  }
-};
+function switchFloor(n) {
+  state.floor = n;
+  document.getElementById('tab-floor-1').classList.toggle('active', n === 1);
+  document.getElementById('tab-floor-2').classList.toggle('active', n === 2);
+  document.getElementById('floor-title').textContent =
+    n === 1 ? 'Level 01 · Engineering & UX Wing' : 'Level 02 · Executive & Operations';
+  renderDesks();
+  window.sound?.click();
+}
 
-// ================= 4. STAFF DIRECTORY =================
-async function loadEmployees() {
-  const search = document.getElementById('input-employee-search')?.value || '';
-  const department = document.getElementById('select-dept-filter')?.value || 'All';
-  const status = document.getElementById('select-status-filter')?.value || 'All';
+function updateDeskBadge() {
+  const free = state.desks.filter(d => d.status === 'available').length;
+  const el = document.getElementById('badge-desks');
+  if (el) el.textContent = `${free} Free`;
+}
 
-  try {
-    const res = await API.getEmployees({ search, department, status });
-    const container = document.getElementById('employees-container');
-    if (!container) return;
+/* Desk modal */
+function openDeskModal(id) {
+  const desk = state.desks.find(d => d.id == id);
+  if (!desk) return;
+  window.sound?.click();
 
-    if (res.data.length === 0) {
-      container.innerHTML = `
-        <div class="col-span-full py-12 text-center text-slate-500 font-mono text-xs">
-          No personnel match your search filters.
+  const occupant   = state.employees.find(e => e.deskId === desk.id || e.id === desk.occupantId);
+  const titleEl    = document.getElementById('desk-modal-title');
+  const subEl      = document.getElementById('desk-modal-sub');
+  const bodyEl     = document.getElementById('desk-modal-body');
+  const footerEl   = document.getElementById('desk-modal-footer');
+
+  titleEl.textContent = `Workstation ${desk.deskId || desk.id}`;
+  subEl.textContent   = `Floor ${desk.floor || 1} · ${desk.section || desk.zone || 'General Zone'}`;
+
+  const statusColor = {
+    available: 'var(--emerald)', occupied: 'var(--rose)',
+    reserved: 'var(--indigo)', maintenance: 'var(--amber)'
+  }[desk.status] || 'var(--cyan)';
+
+  bodyEl.innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">
+      ${infoCell('Status',    `<span style="color:${statusColor};font-weight:700;text-transform:capitalize">${desk.status || 'available'}</span>`)}
+      ${infoCell('Desk ID',   desk.deskId || desk.id)}
+      ${infoCell('Equipment', desk.equipment || 'Standard Setup')}
+      ${infoCell('Zone',      desk.section || desk.zone || 'General')}
+    </div>
+    ${occupant ? `
+      <div style="display:flex;align-items:center;gap:12px;padding:14px;background:var(--surface-2);border:1px solid var(--border-1);border-radius:var(--r-md)">
+        <img src="${avatar(occupant)}" style="width:40px;height:40px;border-radius:10px;object-fit:cover;border:1.5px solid var(--border-2)">
+        <div>
+          <div style="font-weight:700;color:white">${occupant.name}</div>
+          <div style="font-size:11px;color:rgba(255,255,255,0.4);font-family:var(--font-mono)">${occupant.role || occupant.position || '—'} · ${occupant.department}</div>
         </div>
-      `;
-      return;
-    }
+      </div>
+    ` : `<div style="text-align:center;padding:24px 0;color:rgba(255,255,255,0.3);font-family:var(--font-mono);font-size:12px"><i class="fa-solid fa-circle-check" style="color:var(--emerald);font-size:24px;display:block;margin-bottom:8px"></i>This workstation is available to book</div>`}
+  `;
 
-    container.innerHTML = res.data.map(emp => {
-      const isOnline = emp.status === 'In-Office';
-      const isRemote = emp.status === 'Remote';
+  footerEl.innerHTML = '';
+  if (desk.status === 'available') {
+    footerEl.innerHTML = `
+      <button class="btn btn-ghost" onclick="closeModal('desk-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="bookDesk('${desk.id}')"><i class="fa-solid fa-check"></i> Reserve This Desk</button>
+    `;
+  } else if (desk.status === 'occupied') {
+    footerEl.innerHTML = `
+      <button class="btn btn-ghost" onclick="closeModal('desk-modal')">Cancel</button>
+      <button class="btn btn-danger" onclick="releaseDesk('${desk.id}')"><i class="fa-solid fa-circle-xmark"></i> Release Desk</button>
+    `;
+  } else {
+    footerEl.innerHTML = `<button class="btn btn-ghost" onclick="closeModal('desk-modal')">Close</button>`;
+  }
 
-      let statusBadge = 'bg-slate-500/10 text-slate-400 border border-slate-500/20';
-      if (isOnline) statusBadge = 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20';
-      if (isRemote) statusBadge = 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20';
+  openModal('desk-modal');
+}
 
-      return `
-        <div class="pro-card p-5 flex flex-col justify-between">
+async function bookDesk(id) {
+  try {
+    const emp = state.user;
+    await api.put(`/desks/${id}`, { status: 'occupied', occupantId: emp?.id });
+    const desk = state.desks.find(d => d.id == id);
+    if (desk) { desk.status = 'occupied'; desk.occupantId = emp?.id; }
+    closeModal('desk-modal');
+    renderDesks(); updateDeskBadge();
+    showToast('Desk reserved successfully', 'success');
+    window.sound?.success();
+  } catch(e) { showToast('Failed to book desk', 'error'); }
+}
+
+async function releaseDesk(id) {
+  try {
+    await api.put(`/desks/${id}`, { status: 'available', occupantId: null });
+    const desk = state.desks.find(d => d.id == id);
+    if (desk) { desk.status = 'available'; desk.occupantId = null; }
+    closeModal('desk-modal');
+    renderDesks(); updateDeskBadge();
+    showToast('Desk released', 'info');
+    window.sound?.click();
+  } catch(e) { showToast('Failed to release desk', 'error'); }
+}
+
+/* ─── Rooms ─── */
+function renderRooms() {
+  const grid = document.getElementById('rooms-grid');
+  if (!grid) return;
+
+  if (!state.rooms.length) {
+    grid.innerHTML = `<div style="padding:40px;color:rgba(255,255,255,0.3);font-family:var(--font-mono)">No rooms found.</div>`;
+    return;
+  }
+
+  grid.innerHTML = state.rooms.map(r => {
+    const status = r.status || 'available';
+    const amenities = (r.amenities || ['Projector', 'Video Call', 'Whiteboard']).slice(0, 4);
+    const cap = r.capacity || 8;
+    const used = r.status === 'booked' ? Math.floor(cap * 0.7) : 0;
+
+    return `
+      <div class="room-card ${status}" onclick="openRoomModal('${r.id}')">
+        <div class="room-header">
           <div>
-            <div class="flex items-start justify-between mb-3">
-              <img src="${emp.avatar}" class="w-11 h-11 rounded-xl object-cover ring-1 ring-white/10">
-              <span class="status-pill ${statusBadge}">
-                ${emp.status}
-              </span>
-            </div>
-
-            <h4 class="font-bold text-sm text-white">${emp.name}</h4>
-            <p class="text-xs text-cyan-400 font-mono mt-0.5">${emp.role}</p>
-            <p class="text-[10px] text-slate-400 uppercase font-mono">${emp.department}</p>
-
-            <div class="mt-4 pt-3 border-t border-white/5 space-y-1.5 text-[11px] font-mono text-slate-400">
-              <div class="flex items-center gap-2 truncate">
-                <i class="fa-regular fa-envelope text-slate-500"></i>
-                <span class="truncate text-slate-300">${emp.email}</span>
-              </div>
-              <div class="flex items-center gap-2">
-                <i class="fa-solid fa-phone text-slate-500"></i>
-                <span class="text-slate-300">${emp.phone}</span>
-              </div>
-              <div class="flex items-center gap-2">
-                <i class="fa-solid fa-chair text-slate-500"></i>
-                <span class="text-slate-300">${emp.deskId ? `Desk ${emp.deskId}` : 'Hot-Desk Flex'}</span>
-              </div>
-            </div>
+            <div class="room-name">${r.name}</div>
+            <div class="room-meta"><i class="fa-solid fa-users" style="margin-right:4px"></i>Capacity: ${cap}</div>
           </div>
-
-          <div class="mt-4 pt-3 border-t border-white/5 flex items-center justify-between font-mono text-xs">
-            <button onclick="switchUserPersona('${emp.id}')" class="text-cyan-400 hover:text-cyan-300 text-[11px] font-bold">
-              Switch Persona &rarr;
-            </button>
-            <button onclick="deleteEmployee('${emp.id}')" class="text-slate-500 hover:text-rose-400 p-1">
-              <i class="fa-regular fa-trash-can"></i>
-            </button>
+          <span class="room-status-chip ${status}">${status.charAt(0).toUpperCase() + status.slice(1)}</span>
+        </div>
+        <div class="room-amenities">
+          ${amenities.map(a => `<span class="amenity-tag"><i class="fa-solid fa-check" style="color:rgba(255,255,255,0.2);font-size:9px"></i>${a}</span>`).join('')}
+        </div>
+        ${r.bookedBy ? `<div style="margin-top:10px;padding:8px 10px;background:var(--surface-2);border-radius:8px;font-size:11px;color:rgba(255,255,255,0.45)"><i class="fa-solid fa-user" style="margin-right:6px;color:var(--rose)"></i>Booked by: ${r.bookedBy}</div>` : ''}
+        <div class="room-capacity-bar">
+          <div class="room-capacity-label">
+            <span>Utilisation</span>
+            <span>${used} / ${cap}</span>
+          </div>
+          <div class="room-capacity-track">
+            <div class="room-capacity-fill" style="width:${cap > 0 ? Math.round((used/cap)*100) : 0}%"></div>
           </div>
         </div>
-      `;
-    }).join('');
-
-  } catch (err) {
-    console.error('Failed to load employees:', err);
-  }
+      </div>
+    `;
+  }).join('');
 }
 
-window.handleCreateEmployee = async function (e) {
-  e.preventDefault();
-  const name = document.getElementById('new-emp-name').value.trim();
-  const email = document.getElementById('new-emp-email').value.trim();
-  const role = document.getElementById('new-emp-role').value.trim();
-  const department = document.getElementById('new-emp-dept').value;
-  const phone = document.getElementById('new-emp-phone').value.trim();
-  const status = document.getElementById('new-emp-status').value;
+function openRoomModal(id) {
+  const room = state.rooms.find(r => r.id == id);
+  if (!room) return;
+  window.sound?.click();
 
-  try {
-    const res = await API.createEmployee({ name, email, role, department, phone, status });
-    closeModal('modal-add-employee');
-    window.sound?.playSuccess();
-    showToast(res.message, 'success');
-    document.getElementById('form-add-employee').reset();
-    await loadEmployees();
-    await loadCurrentUser();
-    await loadDashboard();
-  } catch (err) {
-    showToast(err.message, 'error');
+  document.getElementById('room-modal-title').textContent = room.name;
+  document.getElementById('room-modal-sub').textContent = `Capacity: ${room.capacity || 8} · Floor ${room.floor || 1}`;
+
+  const status = room.status || 'available';
+  const amenities = room.amenities || ['Projector', '4K Display', 'Video Conferencing', 'Whiteboard', 'Air Conditioning'];
+
+  document.getElementById('room-modal-body').innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">
+      ${infoCell('Status', `<span style="color:${status==='available'?'var(--emerald)':'var(--rose)'};font-weight:700;text-transform:capitalize">${status}</span>`)}
+      ${infoCell('Capacity', `${room.capacity || 8} persons`)}
+      ${infoCell('Floor', `Level 0${room.floor || 1}`)}
+      ${infoCell('Type', room.type || 'Conference Room')}
+    </div>
+    <div style="margin-bottom:14px">
+      <div style="font-size:10.5px;font-family:var(--font-mono);color:rgba(255,255,255,0.3);margin-bottom:8px;letter-spacing:0.5px;text-transform:uppercase">Amenities</div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px">
+        ${amenities.map(a => `<span class="chip chip-indigo"><i class="fa-solid fa-check" style="margin-right:4px"></i>${a}</span>`).join('')}
+      </div>
+    </div>
+    ${status === 'available' ? `
+      <div style="margin-bottom:14px">
+        <label class="form-label">Meeting Title</label>
+        <input type="text" class="form-input" id="room-booking-title" placeholder="E.g. Sprint Planning">
+        <label class="form-label" style="margin-top:10px">Duration</label>
+        <select class="form-input" id="room-booking-duration">
+          <option value="30">30 minutes</option>
+          <option value="60" selected>1 hour</option>
+          <option value="90">1.5 hours</option>
+          <option value="120">2 hours</option>
+        </select>
+      </div>
+    ` : `
+      <div style="padding:12px 14px;background:var(--rose-dim);border:1px solid rgba(251,113,133,0.2);border-radius:var(--r-md);font-size:12px;color:rgba(255,255,255,0.6)">
+        <i class="fa-solid fa-circle-info" style="color:var(--rose);margin-right:6px"></i>
+        Booked by <strong style="color:white">${room.bookedBy || 'a team member'}</strong>. Contact them to renegotiate the slot.
+      </div>
+    `}
+  `;
+
+  const footer = document.getElementById('room-modal-footer');
+  footer.innerHTML = '';
+  if (status === 'available') {
+    footer.innerHTML = `
+      <button class="btn btn-ghost" onclick="closeModal('room-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="bookRoom('${room.id}')"><i class="fa-solid fa-calendar-check"></i> Confirm Booking</button>
+    `;
+  } else {
+    footer.innerHTML = `
+      <button class="btn btn-ghost" onclick="closeModal('room-modal')">Close</button>
+      <button class="btn btn-danger" onclick="releaseRoom('${room.id}')"><i class="fa-solid fa-circle-xmark"></i> Free Room</button>
+    `;
   }
-};
 
-window.deleteEmployee = async function (id) {
-  window.sound?.playWarning();
-  if (confirm('De-register personnel profile?')) {
-    try {
-      const res = await API.deleteEmployee(id);
-      showToast(res.message, 'info');
-      await loadEmployees();
-      await loadCurrentUser();
-      await loadDashboard();
-    } catch (err) {
-      showToast(err.message, 'error');
-    }
-  }
-};
+  openModal('room-modal');
+}
 
-// ================= 5. ATTENDANCE & LEAVES =================
-async function loadAttendance() {
+async function bookRoom(id) {
+  const title = document.getElementById('room-booking-title')?.value || 'Meeting';
   try {
-    const [attRes, leavesRes] = await Promise.all([
-      API.getAttendanceToday(),
-      API.getLeaves()
-    ]);
+    await api.put(`/rooms/${id}`, { status: 'booked', bookedBy: state.user?.name || 'You', title });
+    const room = state.rooms.find(r => r.id == id);
+    if (room) { room.status = 'booked'; room.bookedBy = state.user?.name || 'You'; }
+    closeModal('room-modal');
+    renderRooms();
+    if (state.view === 'dashboard') renderDashboard();
+    showToast(`${title} — room booked!`, 'success');
+    window.sound?.success();
+  } catch(e) { showToast('Booking failed', 'error'); }
+}
 
-    const activeLog = attRes.data.find(a => a.employeeId === state.user.id && !a.clockOut);
-    const statusLabel = document.getElementById('attendance-status-label');
-    const clockActionBtn = document.getElementById('btn-clock-action-text');
-    const quickBtnText = document.getElementById('quick-attendance-text');
+async function releaseRoom(id) {
+  try {
+    await api.put(`/rooms/${id}`, { status: 'available', bookedBy: null });
+    const room = state.rooms.find(r => r.id == id);
+    if (room) { room.status = 'available'; room.bookedBy = null; }
+    closeModal('room-modal');
+    renderRooms();
+    if (state.view === 'dashboard') renderDashboard();
+    showToast('Room released', 'info');
+    window.sound?.click();
+  } catch(e) { showToast('Failed to release room', 'error'); }
+}
 
-    if (activeLog) {
-      if (statusLabel) {
-        statusLabel.innerText = `Online (${activeLog.clockIn})`;
-        statusLabel.className = 'font-mono font-bold text-sm text-emerald-400';
-      }
-      if (clockActionBtn) clockActionBtn.innerText = 'Clock Out Shift';
-      if (quickBtnText) quickBtnText.innerText = 'Clock Out';
-    } else {
-      if (statusLabel) {
-        statusLabel.innerText = 'Shift Concluded';
-        statusLabel.className = 'font-mono font-bold text-sm text-slate-500';
-      }
-      if (clockActionBtn) clockActionBtn.innerText = 'Clock In Shift';
-      if (quickBtnText) quickBtnText.innerText = 'Clock In';
-    }
+/* ─── Employees ─── */
+function renderEmployees(filter = '') {
+  const tbody = document.getElementById('emp-tbody');
+  if (!tbody) return;
 
-    document.getElementById('attendance-count-badge').innerText = `${attRes.data.length} Present`;
+  const f = filter.toLowerCase();
+  const list = state.employees.filter(e =>
+    !f || (e.name||'').toLowerCase().includes(f) ||
+           (e.department||'').toLowerCase().includes(f) ||
+           (e.email||'').toLowerCase().includes(f)
+  );
 
-    const tableBody = document.getElementById('attendance-table-body');
-    if (tableBody) {
-      tableBody.innerHTML = attRes.data.map(log => `
-        <tr class="hover:bg-white/5 font-mono text-xs">
-          <td class="py-2.5 font-bold text-white">${log.employeeName}</td>
-          <td class="py-2.5 text-slate-400">${log.clockIn}</td>
-          <td class="py-2.5">
-            <span class="status-pill ${log.mode === 'Remote' ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20' : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'}">
-              ${log.mode}
-            </span>
-          </td>
-          <td class="py-2.5 text-slate-400">${log.clockOut ? `Done (${log.clockOut})` : 'Active'}</td>
-        </tr>
-      `).join('');
-    }
+  if (!list.length) {
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:40px;color:rgba(255,255,255,0.25);font-family:var(--font-mono)">No results.</td></tr>`;
+    return;
+  }
 
-    const leavesList = document.getElementById('leaves-list-container');
-    if (leavesList) {
-      leavesList.innerHTML = leavesRes.data.map(lv => {
-        const isPending = lv.status === 'Pending';
-        const isApproved = lv.status === 'Approved';
-
-        let badge = 'bg-amber-500/10 text-amber-400 border border-amber-500/20';
-        if (isApproved) badge = 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20';
-        if (lv.status === 'Rejected') badge = 'bg-rose-500/10 text-rose-400 border border-rose-500/20';
-
-        return `
-          <div class="p-3 rounded-xl bg-obsidian-850 border border-white/5 flex items-start justify-between gap-3 font-mono text-xs">
+  tbody.innerHTML = list.map(e => {
+    const statusColor = { 'in-office': 'emerald', 'remote': 'cyan', 'out': 'slate' }[e.status] || 'slate';
+    const deskLabel = state.desks.find(d => d.occupantId === e.id || d.id === e.deskId)?.deskId || '—';
+    return `
+      <tr>
+        <td>
+          <div style="display:flex;align-items:center;gap:10px">
+            <img src="${avatar(e)}" class="emp-avatar" alt="${e.name}" onerror="this.src='https://ui-avatars.com/api/?name=${encodeURIComponent(e.name)}&background=0d1425&color=22d3ee&size=64'">
             <div>
-              <div class="flex items-center gap-2 mb-1">
-                <span class="font-bold text-white">${lv.employeeName}</span>
-                <span class="status-pill ${badge}">${lv.status}</span>
-              </div>
-              <div class="text-[11px] text-cyan-400 font-bold">${lv.leaveType} (${lv.days} day)</div>
-              <div class="text-[10px] text-slate-500 mt-0.5">${lv.startDate} to ${lv.endDate} • "${lv.reason}"</div>
+              <div class="emp-name">${e.name}</div>
+              <div class="emp-email">${e.email || '—'}</div>
             </div>
-
-            ${isPending ? `
-              <div class="flex items-center gap-1.5 whitespace-nowrap">
-                <button onclick="updateLeave('${lv.id}', 'Approved')" class="px-2.5 py-1 rounded-lg font-bold bg-emerald-500 text-white hover:bg-emerald-600 transition-colors">
-                  Approve
-                </button>
-                <button onclick="updateLeave('${lv.id}', 'Rejected')" class="px-2.5 py-1 rounded-lg font-bold bg-white/5 text-rose-400 hover:bg-white/10 transition-colors">
-                  Reject
-                </button>
-              </div>
-            ` : ''}
           </div>
-        `;
-      }).join('');
-    }
+        </td>
+        <td>${e.department || '—'}</td>
+        <td style="color:rgba(255,255,255,0.6)">${e.role || e.position || '—'}</td>
+        <td><span class="chip chip-${statusColor}">${capitalise(e.status || 'out')}</span></td>
+        <td><span class="chip chip-slate">${deskLabel}</span></td>
+        <td>
+          <button class="btn btn-ghost" style="padding:5px 10px;font-size:11px" onclick="deleteEmployee('${e.id}')">
+            <i class="fa-solid fa-trash-can" style="color:var(--rose)"></i>
+          </button>
+        </td>
+      </tr>
+    `;
+  }).join('');
 
-  } catch (err) {
-    console.error('Failed to load attendance:', err);
+  // Bind search
+  const searchEl = document.getElementById('emp-search');
+  if (searchEl && !searchEl.dataset.bound) {
+    searchEl.dataset.bound = '1';
+    searchEl.addEventListener('input', () => renderEmployees(searchEl.value));
   }
 }
 
-window.handleAttendanceAction = async function () {
-  try {
-    const attRes = await API.getAttendanceToday();
-    const active = attRes.data.find(a => a.employeeId === state.user.id && !a.clockOut);
+function openAddEmployeeModal() {
+  window.sound?.click();
+  openModal('emp-modal');
+}
 
-    if (active) {
-      const res = await API.clockOut({ employeeId: state.user.id });
-      window.sound?.playClick();
-      showToast(res.message, 'info');
-    } else {
-      const res = await API.clockIn({
-        employeeId: state.user.id,
-        employeeName: state.user.name,
-        mode: state.user.status === 'Remote' ? 'Remote' : 'In-Office'
-      });
-      window.sound?.playSuccess();
-      if (typeof confetti === 'function') confetti();
-      showToast(res.message, 'success');
-    }
+async function submitEmployee() {
+  const fname = document.getElementById('emp-fname').value.trim();
+  const lname = document.getElementById('emp-lname').value.trim();
+  const email = document.getElementById('emp-email').value.trim();
+  const dept  = document.getElementById('emp-dept').value;
+  const role  = document.getElementById('emp-role').value.trim();
+  const floor = document.getElementById('emp-floor').value;
+  const type  = document.getElementById('emp-type').value;
 
-    await loadAttendance();
-    await loadDashboard();
-  } catch (err) {
-    showToast(err.message, 'error');
-  }
-};
-
-window.handleApplyLeave = async function (e) {
-  e.preventDefault();
-  const leaveType = document.getElementById('leave-type').value;
-  const startDate = document.getElementById('leave-start-date').value;
-  const endDate = document.getElementById('leave-end-date').value;
-  const reason = document.getElementById('leave-reason').value.trim();
+  if (!fname || !lname || !email || !role) { showToast('Please fill in required fields', 'warning'); return; }
 
   try {
-    const res = await API.applyLeave({
-      employeeId: state.user.id,
-      employeeName: state.user.name,
-      department: state.user.department,
-      leaveType,
-      startDate,
-      endDate,
-      days: 1,
-      reason
+    const emp = await api.post('/employees', {
+      name: `${fname} ${lname}`, email, department: dept, role, floor: +floor, employmentType: type, status: 'out',
     });
+    state.employees.push(emp);
+    closeModal('emp-modal');
+    renderEmployees();
+    populateEmployeeDropdowns();
+    renderPersonaList();
+    showToast(`${emp.name} added to directory`, 'success');
+    window.sound?.success();
+    ['emp-fname','emp-lname','emp-email','emp-role'].forEach(id => { const el = document.getElementById(id); if(el) el.value=''; });
+  } catch(e) { showToast('Failed to add employee', 'error'); }
+}
 
-    closeModal('modal-apply-leave');
-    window.sound?.playSuccess();
-    showToast(res.message, 'success');
-    document.getElementById('form-apply-leave').reset();
-    await loadAttendance();
-    await loadDashboard();
-  } catch (err) {
-    showToast(err.message, 'error');
-  }
-};
-
-window.updateLeave = async function (id, status) {
+async function deleteEmployee(id) {
+  if (!confirm('Remove this employee?')) return;
   try {
-    const res = await API.updateLeaveStatus(id, status);
-    if (status === 'Approved') {
-      window.sound?.playSuccess();
-    } else {
-      window.sound?.playClick();
-    }
-    showToast(res.message, status === 'Approved' ? 'success' : 'info');
-    await loadAttendance();
-    await loadDashboard();
-  } catch (err) {
-    showToast(err.message, 'error');
-  }
-};
+    await api.delete(`/employees/${id}`);
+    state.employees = state.employees.filter(e => e.id != id);
+    renderEmployees();
+    populateEmployeeDropdowns();
+    showToast('Employee removed', 'info');
+  } catch(e) { showToast('Failed to delete employee', 'error'); }
+}
 
-// ================= 6. VISITORS & 3D BADGES =================
-async function loadVisitors() {
+/* ─── Attendance ─── */
+function renderAttendance() {
+  const tbody = document.getElementById('att-tbody');
+  if (!tbody) return;
+
+  const sorted = [...state.attendance].sort((a,b) => new Date(b.date||b.checkIn||0) - new Date(a.date||a.checkIn||0));
+
+  tbody.innerHTML = sorted.slice(0, 30).map(a => {
+    const emp = state.employees.find(e => e.id === a.employeeId);
+    const name = emp?.name || 'Unknown';
+    const date = a.date ? new Date(a.date).toLocaleDateString('en-IN') : '—';
+    const checkIn  = a.checkIn  ? new Date(a.checkIn).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}) : '—';
+    const checkOut = a.checkOut ? new Date(a.checkOut).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}) : '—';
+    const statusColor = { 'in-office': 'emerald', 'remote': 'cyan', 'out': 'slate' }[a.status] || 'slate';
+    const hours = (a.checkIn && a.checkOut)
+      ? `${((new Date(a.checkOut) - new Date(a.checkIn)) / 3600000).toFixed(1)}h`
+      : '—';
+
+    return `
+      <tr>
+        <td>${name}</td>
+        <td style="font-family:var(--font-mono);font-size:11px">${date}</td>
+        <td style="font-family:var(--font-mono);font-size:11px;color:var(--emerald)">${checkIn}</td>
+        <td style="font-family:var(--font-mono);font-size:11px;color:var(--rose)">${checkOut}</td>
+        <td><span class="chip chip-${statusColor}">${capitalise(a.status||'out')}</span></td>
+        <td style="font-family:var(--font-mono);font-size:11px;color:rgba(255,255,255,0.5)">${hours}</td>
+      </tr>
+    `;
+  }).join('') || `<tr><td colspan="6" style="text-align:center;padding:30px;color:rgba(255,255,255,0.25);font-family:var(--font-mono)">No records yet.</td></tr>`;
+}
+
+async function submitAttendance() {
+  const empId = document.getElementById('att-employee').value;
+  const status = document.getElementById('att-status').value;
+  const notes  = document.getElementById('att-notes').value;
+
+  if (!empId) { showToast('Select an employee', 'warning'); return; }
+
   try {
-    const res = await API.getVisitors();
-    const tbody = document.getElementById('visitors-table-body');
-    if (!tbody) return;
+    const rec = await api.post('/attendance', { employeeId: empId, status, notes, date: new Date().toISOString(), checkIn: new Date().toISOString() });
+    state.attendance.push(rec);
 
-    tbody.innerHTML = res.data.map(vis => {
-      const isCheckedIn = vis.status === 'Checked-In';
+    // Update employee status locally
+    const emp = state.employees.find(e => e.id == empId);
+    if (emp) emp.status = status;
 
+    // Update clockin button if it's the current user
+    if (state.user?.id == empId) updateClockinBtn(status);
+
+    renderAttendance();
+    if (state.view === 'dashboard') renderDashboard();
+    showToast('Attendance recorded', 'success');
+    window.sound?.success();
+  } catch(e) { showToast('Failed to record attendance', 'error'); }
+}
+
+async function submitLeave() {
+  const empId = document.getElementById('leave-employee').value;
+  const start = document.getElementById('leave-start').value;
+  const end   = document.getElementById('leave-end').value;
+  const type  = document.getElementById('leave-type').value;
+
+  if (!empId || !start || !end) { showToast('Fill all required fields', 'warning'); return; }
+
+  try {
+    await api.post('/attendance/leave', { employeeId: empId, leaveType: type, startDate: start, endDate: end, status: 'pending' });
+    showToast('Leave request submitted', 'success');
+    window.sound?.success();
+  } catch(e) { showToast('Failed to submit leave request', 'error'); }
+}
+
+/* ─── Visitors ─── */
+function renderVisitors() {
+  const tbody = document.getElementById('vis-tbody');
+  if (tbody) {
+    tbody.innerHTML = state.visitors.slice(-20).reverse().map(v => {
+      const host = state.employees.find(e => e.id === v.hostId);
       return `
-        <tr class="hover:bg-white/5 font-mono text-xs">
-          <td class="py-3 font-bold text-cyan-400">${vis.badgeNumber}</td>
-          <td class="py-3 font-bold text-white">${vis.name}</td>
-          <td class="py-3 text-slate-400">${vis.company}</td>
-          <td class="py-3 text-slate-400">${vis.hostEmployee}</td>
-          <td class="py-3 text-slate-400">${vis.purpose}</td>
-          <td class="py-3 text-slate-400">${vis.checkInTime || 'Expected'}</td>
-          <td class="py-3">
-            <span class="status-pill ${isCheckedIn ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-slate-500/10 text-slate-400 border border-slate-500/20'}">
-              ${vis.status}
-            </span>
+        <tr>
+          <td>
+            <div style="font-weight:600;color:white">${v.name}</div>
+            <div style="font-size:10px;font-family:var(--font-mono);color:rgba(255,255,255,0.35)">${v.organization || v.org || '—'}</div>
           </td>
-          <td class="py-3 text-right space-x-2">
-            <button onclick="viewVisitorBadge('${vis.id}')" class="px-2.5 py-1 rounded-lg bg-cyan-500/10 text-cyan-400 hover:bg-cyan-500/20 border border-cyan-500/20 transition-colors">
-              Pass NFC
-            </button>
-            ${isCheckedIn ? `
-              <button onclick="checkoutVisitor('${vis.id}')" class="px-2.5 py-1 rounded-lg bg-white/5 text-rose-400 hover:bg-white/10 transition-colors">
-                Check Out
-              </button>
-            ` : ''}
-          </td>
+          <td>${host?.name || v.hostName || '—'}</td>
+          <td style="font-family:var(--font-mono);font-size:11px">${v.checkIn ? new Date(v.checkIn).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}) : '—'}</td>
+          <td><span class="chip chip-indigo">${v.accessLevel || 'Lobby'}</span></td>
+          <td><span class="chip chip-${v.checkOut ? 'slate' : 'emerald'}">${v.checkOut ? 'Checked Out' : 'Active'}</span></td>
         </tr>
       `;
-    }).join('');
+    }).join('') || `<tr><td colspan="5" style="text-align:center;padding:30px;color:rgba(255,255,255,0.25);font-family:var(--font-mono)">No visitors today.</td></tr>`;
+  }
 
-  } catch (err) {
-    console.error('Failed to load visitors:', err);
+  // Set datetime-local to now
+  const dtEl = document.getElementById('vis-checkin');
+  if (dtEl && !dtEl.value) {
+    const now = new Date();
+    now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+    dtEl.value = now.toISOString().slice(0,16);
   }
 }
 
-window.handleCreateVisitor = async function (e) {
-  e.preventDefault();
-  const name = document.getElementById('vis-name').value.trim();
-  const company = document.getElementById('vis-company').value.trim();
-  const hostEmployee = document.getElementById('vis-host').value;
+async function registerVisitor() {
+  const name    = document.getElementById('vis-name').value.trim();
+  const org     = document.getElementById('vis-org').value.trim();
+  const phone   = document.getElementById('vis-phone').value.trim();
+  const hostId  = document.getElementById('vis-host').value;
   const purpose = document.getElementById('vis-purpose').value.trim();
-  const ndaSigned = document.getElementById('vis-nda').checked;
+  const checkin = document.getElementById('vis-checkin').value;
+  const access  = document.getElementById('vis-access').value;
+
+  if (!name || !hostId) { showToast('Visitor name and host are required', 'warning'); return; }
 
   try {
-    const res = await API.createVisitor({ name, company, hostEmployee, purpose, ndaSigned, checkInNow: true });
-    closeModal('modal-add-visitor');
-    window.sound?.playSuccess();
-    showToast(res.message, 'success');
-    document.getElementById('form-add-visitor').reset();
-    await loadVisitors();
-    await loadDashboard();
-    viewVisitorBadge(res.data.id);
-  } catch (err) {
-    showToast(err.message, 'error');
+    const vis = await api.post('/visitors', {
+      name, organization: org, phone, hostId, purpose, checkIn: checkin || new Date().toISOString(),
+      accessLevel: access, badgeId: `NX-${Math.floor(100000 + Math.random() * 900000)}`
+    });
+    state.visitors.push(vis);
+    renderVisitors();
+    updateBadgePreview(vis);
+    showToast(`Visitor pass issued for ${name}`, 'success');
+    window.sound?.success();
+
+    // Clear form
+    ['vis-name','vis-org','vis-phone','vis-purpose'].forEach(id => {
+      const el = document.getElementById(id); if(el) el.value = '';
+    });
+  } catch(e) { showToast('Failed to register visitor', 'error'); }
+}
+
+function updateBadgePreview(vis) {
+  const host = state.employees.find(e => e.id == vis.hostId);
+  setText('badge-name',   vis.name || '— Visitor Name —');
+  setText('badge-org',    vis.organization || '—');
+  setText('badge-host',   host?.name || '—');
+  setText('badge-access', vis.accessLevel || '—');
+  setText('badge-id',     vis.badgeId || `NX-${Math.floor(100000+Math.random()*900000)}`);
+  setText('badge-time',   vis.checkIn ? new Date(vis.checkIn).toLocaleString('en-IN',{hour:'2-digit',minute:'2-digit',day:'2-digit',month:'short'}) : '—');
+
+  // Simple QR-like pattern in the badge
+  const qr = document.getElementById('badge-qr');
+  if (qr) {
+    qr.innerHTML = `<svg viewBox="0 0 100 100" width="56" height="56" xmlns="http://www.w3.org/2000/svg">
+      ${generateQRPattern()}
+    </svg>`;
   }
-};
+}
 
-window.viewVisitorBadge = async function (id) {
-  try {
-    const res = await API.getVisitorBadge(id);
-    const vis = res.data;
-
-    document.getElementById('badge-vis-name').innerText = vis.name;
-    document.getElementById('badge-vis-company').innerText = vis.company;
-    document.getElementById('badge-vis-id').innerText = vis.badgeNumber;
-    document.getElementById('badge-vis-host').innerText = vis.hostEmployee;
-    document.getElementById('badge-vis-date').innerText = vis.date;
-
-    document.getElementById('badge-flipper')?.classList.remove('is-flipped');
-    openModal('modal-visitor-badge');
-  } catch (err) {
-    showToast(err.message, 'error');
+function generateQRPattern() {
+  let rects = '';
+  const size = 7;
+  const grid = Array.from({length: size}, () => Array.from({length: size}, () => Math.random() > 0.45));
+  // Corner squares
+  [[0,0],[0,5],[5,0]].forEach(([r,c]) => {
+    for(let dr=0;dr<2;dr++) for(let dc=0;dc<2;dc++) grid[r+dr][c+dc] = true;
+  });
+  for(let r=0;r<size;r++) for(let c=0;c<size;c++) {
+    if(grid[r][c]) rects += `<rect x="${c*14}" y="${r*14}" width="12" height="12" fill="#111" rx="2"/>`;
   }
-};
+  return `<rect width="100" height="100" fill="white" rx="4"/>${rects}`;
+}
 
-window.flipBadge = function () {
-  window.sound?.playClick();
-  document.getElementById('badge-flipper')?.classList.toggle('is-flipped');
-};
+function printBadge() {
+  window.print();
+  showToast('Badge sent to printer', 'info');
+}
 
-window.checkoutVisitor = async function (id) {
-  try {
-    const res = await API.checkoutVisitor(id);
-    window.sound?.playClick();
-    showToast(res.message, 'info');
-    await loadVisitors();
-    await loadDashboard();
-  } catch (err) {
-    showToast(err.message, 'error');
+/* ─── Assets ─── */
+function renderAssets(filter = '') {
+  const grid = document.getElementById('asset-grid');
+  if (!grid) return;
+
+  const f = filter.toLowerCase();
+  const list = state.assets.filter(a =>
+    !f || (a.name||'').toLowerCase().includes(f) ||
+           (a.serialNumber||'').toLowerCase().includes(f)
+  );
+
+  if (!list.length) {
+    grid.innerHTML = `<div style="grid-column:1/-1;padding:60px;text-align:center;color:rgba(255,255,255,0.25);font-family:var(--font-mono)">No assets found.</div>`;
+    return;
   }
-};
 
-// ================= 7. HARDWARE ASSETS =================
-async function loadAssets() {
-  try {
-    const res = await API.getAssets();
-    const container = document.getElementById('assets-container');
-    if (!container) return;
+  const icons = { laptop:'fa-laptop', monitor:'fa-desktop', phone:'fa-mobile-screen', printer:'fa-print', server:'fa-server', headset:'fa-headset', tablet:'fa-tablet', misc:'fa-microchip' };
 
-    container.innerHTML = res.data.map(asset => {
-      const isInUse = asset.status === 'In Use';
-
-      return `
-        <div class="pro-card p-5 flex flex-col justify-between">
-          <div>
-            <div class="flex items-center justify-between mb-3 font-mono">
-              <span class="text-[10px] text-slate-500 uppercase">${asset.category}</span>
-              <span class="status-pill ${isInUse ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20' : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'}">
-                ${asset.status}
-              </span>
-            </div>
-
-            <h4 class="font-bold text-sm text-white">${asset.name}</h4>
-            <div class="font-mono text-[10px] text-slate-500 mt-1">SN: ${asset.serialNumber}</div>
-
-            <div class="mt-4 p-3 rounded-xl bg-obsidian-850 border border-white/5 font-mono text-[11px] space-y-1">
-              <div class="flex justify-between">
-                <span class="text-slate-500">Holder:</span>
-                <span class="font-bold text-white">${asset.assignedTo || 'In Vault Storage'}</span>
-              </div>
-              <div class="flex justify-between">
-                <span class="text-slate-500">Condition:</span>
-                <span class="text-emerald-400">${asset.condition}</span>
-              </div>
-            </div>
-          </div>
-
-          <div class="mt-4 pt-3 border-t border-white/5 font-mono text-xs">
-            ${isInUse ? `
-              <button onclick="toggleAssetAssign('${asset.id}', 'None')" class="w-full py-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 transition-colors">
-                Return to Vault
-              </button>
-            ` : `
-              <button onclick="toggleAssetAssign('${asset.id}', '${state.user.name}')" class="w-full py-2 rounded-xl bg-cyan-500 hover:bg-cyan-600 text-white font-bold transition-all shadow-md shadow-cyan-500/20">
-                Claim for My Setup
-              </button>
-            `}
-          </div>
+  grid.innerHTML = list.map(a => {
+    const emp = state.employees.find(e => e.id === a.assignedTo);
+    const typeKey = a.type?.toLowerCase() || 'misc';
+    const statusColor = { active:'emerald', spare:'cyan', maintenance:'amber', retired:'rose' }[a.status] || 'slate';
+    return `
+      <div class="asset-card">
+        <div class="asset-icon ${typeKey}">
+          <i class="fa-solid ${icons[typeKey] || 'fa-microchip'}"></i>
         </div>
-      `;
-    }).join('');
+        <div class="asset-name">${a.name}</div>
+        <div class="asset-serial mono">${a.serialNumber || 'N/A'}</div>
+        <div style="margin-top:8px"><span class="chip chip-${statusColor}">${capitalise(a.status||'active')}</span></div>
+        <div class="asset-owner">${emp ? `<i class="fa-solid fa-user" style="margin-right:5px;color:rgba(255,255,255,0.3)"></i>${emp.name}` : '<i class="fa-solid fa-circle" style="margin-right:5px;color:rgba(255,255,255,0.15)"></i>Unassigned'}</div>
+      </div>
+    `;
+  }).join('');
 
-  } catch (err) {
-    console.error('Failed to load assets:', err);
+  const searchEl = document.getElementById('asset-search');
+  if (searchEl && !searchEl.dataset.bound) {
+    searchEl.dataset.bound = '1';
+    searchEl.addEventListener('input', () => renderAssets(searchEl.value));
   }
 }
 
-window.toggleAssetAssign = async function (id, assignee) {
-  try {
-    const res = await API.assignAsset(id, assignee);
-    window.sound?.playSuccess();
-    showToast(res.message, 'success');
-    await loadAssets();
-  } catch (err) {
-    showToast(err.message, 'error');
+function openAddAssetModal() {
+  window.sound?.click();
+  // Populate employee dropdown in asset modal
+  const sel = document.getElementById('asset-employee');
+  if (sel) {
+    sel.innerHTML = `<option value="">Unassigned</option>` +
+      state.employees.map(e => `<option value="${e.id}">${e.name}</option>`).join('');
   }
-};
-
-window.handleCreateAsset = async function (e) {
-  e.preventDefault();
-  const name = document.getElementById('asset-name').value.trim();
-  const category = document.getElementById('asset-category').value;
-  const condition = document.getElementById('asset-condition').value;
-
-  try {
-    const res = await API.createAsset({ name, category, condition });
-    closeModal('modal-add-asset');
-    window.sound?.playSuccess();
-    showToast(res.message, 'success');
-    document.getElementById('form-add-asset').reset();
-    await loadAssets();
-  } catch (err) {
-    showToast(err.message, 'error');
-  }
-};
-
-// ================= MODAL HELPERS =================
-window.openModal = function (modalId) {
-  window.sound?.playPop();
-  document.getElementById(modalId)?.classList.remove('hidden');
-};
-
-window.closeModal = function (modalId) {
-  window.sound?.playClick();
-  document.getElementById(modalId)?.classList.add('hidden');
-};
-
-function debounce(fn, wait) {
-  let timeout;
-  return function (...args) {
-    clearTimeout(timeout);
-    timeout = setTimeout(() => fn.apply(this, args), wait);
-  };
+  openModal('asset-modal');
 }
+
+async function submitAsset() {
+  const name   = document.getElementById('asset-name').value.trim();
+  const type   = document.getElementById('asset-type').value;
+  const serial = document.getElementById('asset-serial').value.trim();
+  const empId  = document.getElementById('asset-employee').value;
+  const status = document.getElementById('asset-status').value;
+
+  if (!name) { showToast('Asset name is required', 'warning'); return; }
+
+  try {
+    const asset = await api.post('/assets', { name, type, serialNumber: serial, assignedTo: empId||null, status });
+    state.assets.push(asset);
+    closeModal('asset-modal');
+    renderAssets();
+    showToast(`${name} added to inventory`, 'success');
+    window.sound?.success();
+    document.getElementById('asset-name').value = '';
+    document.getElementById('asset-serial').value = '';
+  } catch(e) { showToast('Failed to add asset', 'error'); }
+}
+
+/* ─── User / Persona ─── */
+function renderUserChip() {
+  if (!state.user) return;
+  setText('user-name', state.user.name);
+  setText('user-role', state.user.role || state.user.position || '—');
+  const avatarEl = document.getElementById('user-avatar');
+  if (avatarEl) {
+    avatarEl.src = avatar(state.user);
+    avatarEl.onerror = () => { avatarEl.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(state.user.name)}&background=0d1425&color=22d3ee&size=64`; };
+  }
+}
+
+function renderPersonaList() {
+  const list = document.getElementById('persona-list');
+  if (!list) return;
+  list.innerHTML = state.employees.slice(0, 8).map(e => `
+    <div class="persona-item" onclick="switchPersona('${e.id}')">
+      <img src="${avatar(e)}" class="persona-avatar" onerror="this.src='https://ui-avatars.com/api/?name=${encodeURIComponent(e.name)}&background=0d1425&color=22d3ee&size=64'" alt="${e.name}">
+      <div class="persona-info">
+        <div class="persona-name">${e.name}</div>
+        <div class="persona-role">${e.role || e.position || '—'} · ${e.department || ''}</div>
+      </div>
+    </div>
+  `).join('');
+}
+
+function switchPersona(id) {
+  const emp = state.employees.find(e => e.id == id);
+  if (emp) {
+    state.user = emp;
+    renderUserChip();
+    updateClockinBtn(emp.status);
+    closePersonaDropdown();
+    showToast(`Viewing as ${emp.name}`, 'info');
+    window.sound?.click();
+  }
+}
+
+function initPersonaToggle() {
+  const btn = document.getElementById('btn-user');
+  const dd  = document.getElementById('persona-dropdown');
+  if (btn && dd) {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      dd.classList.toggle('open');
+    });
+    document.addEventListener('click', () => closePersonaDropdown());
+  }
+}
+
+function closePersonaDropdown() {
+  document.getElementById('persona-dropdown')?.classList.remove('open');
+}
+
+function populateEmployeeDropdowns() {
+  ['att-employee','leave-employee','vis-host'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.innerHTML = `<option value="">Select employee…</option>` +
+        state.employees.map(e => `<option value="${e.id}">${e.name}</option>`).join('');
+    }
+  });
+}
+
+/* ─── Topbar Actions ─── */
+function initTopbarActions() {
+  // Clock-in button
+  document.getElementById('btn-clockin')?.addEventListener('click', async () => {
+    if (!state.user) return;
+    const curStatus = state.user.status || 'out';
+    const newStatus = curStatus === 'in-office' ? 'out' : 'in-office';
+    try {
+      await api.post('/attendance', { employeeId: state.user.id, status: newStatus, date: new Date().toISOString(), checkIn: new Date().toISOString() });
+      state.user.status = newStatus;
+      const rec = state.attendance.find(a => a.employeeId === state.user.id);
+      if (rec) rec.status = newStatus; else state.attendance.push({ employeeId: state.user.id, status: newStatus });
+      updateClockinBtn(newStatus);
+      showToast(newStatus === 'in-office' ? 'Good morning! Clocked in.' : 'Goodbye! Clocked out.', newStatus === 'in-office' ? 'success' : 'info');
+      window.sound?.success();
+    } catch(e) { showToast('Attendance update failed', 'error'); }
+  });
+
+  // Sound toggle
+  document.getElementById('btn-sound')?.addEventListener('click', () => {
+    const enabled = window.sound?.toggle();
+    const icon = document.getElementById('icon-sound');
+    if (icon) icon.className = `fa-solid fa-volume-${enabled ? 'high' : 'xmark'}`;
+    showToast(`Audio ${enabled ? 'enabled' : 'muted'}`, 'info');
+  });
+
+  // Reset DB
+  document.getElementById('btn-reset')?.addEventListener('click', async () => {
+    if (!confirm('Reset all demo data?')) return;
+    try {
+      await api.post('/seed', {});
+      showToast('Demo data reset', 'success');
+      setTimeout(() => location.reload(), 800);
+    } catch(e) { showToast('Reset failed', 'error'); }
+  });
+}
+
+function updateClockinBtn(status) {
+  const btn  = document.getElementById('btn-clockin');
+  const lbl  = document.getElementById('clockin-label');
+  const dot  = document.getElementById('clockin-dot');
+  if (!btn) return;
+  const active = (status === 'in-office');
+  btn.className = `clockin-btn${active ? ' clocked-out' : ''}`;
+  if (lbl) lbl.textContent = active ? 'Clock Out' : 'Clock In';
+  if (dot) dot.style.background = active ? 'var(--rose)' : 'var(--emerald)';
+}
+
+/* ─── Command Palette ─── */
+function initCommandPalette() {
+  const overlay = document.getElementById('cmd-overlay');
+  const input   = document.getElementById('cmd-input');
+  const list    = document.getElementById('cmd-list');
+
+  document.getElementById('cmd-trigger')?.addEventListener('click', () => openCmd());
+
+  document.addEventListener('keydown', e => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); openCmd(); }
+    if (e.key === 'Escape') closeCmd();
+  });
+
+  overlay?.addEventListener('click', e => { if(e.target === overlay) closeCmd(); });
+
+  input?.addEventListener('input', () => renderCmdItems(input.value));
+  input?.addEventListener('keydown', e => {
+    const items = list?.querySelectorAll('.cmd-item') || [];
+    if (e.key === 'ArrowDown') { state.cmdFocusIdx = Math.min(state.cmdFocusIdx+1, items.length-1); highlightCmd(items); }
+    if (e.key === 'ArrowUp')   { state.cmdFocusIdx = Math.max(state.cmdFocusIdx-1, 0); highlightCmd(items); }
+    if (e.key === 'Enter')     { items[state.cmdFocusIdx]?.click(); }
+  });
+
+  renderCmdItems('');
+}
+
+function openCmd() {
+  document.getElementById('cmd-overlay')?.classList.add('open');
+  setTimeout(() => document.getElementById('cmd-input')?.focus(), 80);
+  window.sound?.click();
+}
+
+function closeCmd() {
+  document.getElementById('cmd-overlay')?.classList.remove('open');
+  if (document.getElementById('cmd-input')) document.getElementById('cmd-input').value = '';
+}
+
+function highlightCmd(items) {
+  items.forEach((item, i) => item.classList.toggle('focused', i === state.cmdFocusIdx));
+  items[state.cmdFocusIdx]?.scrollIntoView({block:'nearest'});
+}
+
+function renderCmdItems(q) {
+  const views = [
+    { icon:'fa-chart-tree-map', label:'Overview Dashboard', meta:'view', action: () => navigateTo('dashboard') },
+    { icon:'fa-layer-group',    label:'Floor Plan & Desks', meta:'view', action: () => navigateTo('desks') },
+    { icon:'fa-chalkboard',     label:'Meeting Rooms',       meta:'view', action: () => navigateTo('rooms') },
+    { icon:'fa-id-card-clip',   label:'Personnel Directory', meta:'view', action: () => navigateTo('employees') },
+    { icon:'fa-user-clock',     label:'Attendance',          meta:'view', action: () => navigateTo('attendance') },
+    { icon:'fa-fingerprint',    label:'Visitors & Badges',   meta:'view', action: () => navigateTo('visitors') },
+    { icon:'fa-server',         label:'IT Assets',           meta:'view', action: () => navigateTo('assets') },
+  ];
+
+  const empItems = state.employees.map(e => ({
+    icon:'fa-user', label:e.name, meta:`${e.department} · ${e.role||e.position||'—'}`,
+    action: () => { navigateTo('employees'); closeCmd(); }
+  }));
+
+  const all = [...views, ...empItems].filter(i =>
+    !q || i.label.toLowerCase().includes(q.toLowerCase()) || (i.meta||'').toLowerCase().includes(q.toLowerCase())
+  ).slice(0, 10);
+
+  const list = document.getElementById('cmd-list');
+  if (!list) return;
+
+  state.cmdFocusIdx = 0;
+  list.innerHTML = all.length ? all.map((item, idx) => `
+    <div class="cmd-item${idx===0?' focused':''}" onclick="(${item.action.toString()})();closeCmd()">
+      <div class="cmd-item-icon"><i class="fa-solid ${item.icon}"></i></div>
+      <div>
+        <div class="cmd-item-label">${item.label}</div>
+        ${item.meta ? `<div class="cmd-item-meta">${item.meta}</div>` : ''}
+      </div>
+    </div>
+  `).join('') : `<div style="padding:30px;text-align:center;font-size:12px;color:rgba(255,255,255,0.25);font-family:var(--font-mono)">No results for "${q}"</div>`;
+}
+
+/* ─── Modal helpers ─── */
+function openModal(id) {
+  document.getElementById(id)?.classList.add('open');
+  document.addEventListener('keydown', escModalListener);
+}
+
+function closeModal(id) {
+  document.getElementById(id)?.classList.remove('open');
+}
+
+function escModalListener(e) {
+  if (e.key === 'Escape') {
+    ['desk-modal','room-modal','emp-modal','asset-modal'].forEach(id => closeModal(id));
+    document.removeEventListener('keydown', escModalListener);
+  }
+}
+
+/* ─── Toast Notifications ─── */
+function showToast(msg, type = 'info') {
+  const icons = { success:'fa-circle-check', error:'fa-circle-xmark', info:'fa-circle-info', warning:'fa-triangle-exclamation' };
+  const container = document.getElementById('toast-container');
+  if (!container) return;
+
+  const toast = document.createElement('div');
+  toast.className = `toast ${type}`;
+  toast.innerHTML = `<i class="fa-solid ${icons[type]||'fa-info'} toast-icon"></i><span class="toast-msg">${msg}</span>`;
+  container.appendChild(toast);
+
+  setTimeout(() => { toast.classList.add('out'); setTimeout(() => toast.remove(), 300); }, 3400);
+}
+
+/* ─── Theme (stays dark only — cleaner) ─── */
+function initTheme() {
+  // Pure dark mode — no toggle needed for v3
+}
+
+/* ─── Utility ─── */
+function setText(id, val) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = val ?? '—';
+}
+
+function avatar(emp) {
+  return emp?.avatar || emp?.avatarUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(emp?.name||'X')}&background=0d1425&color=22d3ee&size=64&bold=true`;
+}
+
+function capitalise(s) {
+  if (!s) return '—';
+  return s.replace(/-/g,' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function formatRelative(dateStr) {
+  if (!dateStr) return '—';
+  const diff = Date.now() - new Date(dateStr);
+  const m = Math.floor(diff / 60000);
+  if (m < 1)  return 'just now';
+  if (m < 60) return `${m}m ago`;
+  return `${Math.floor(m/60)}h ago`;
+}
+
+function infoCell(label, value) {
+  return `<div style="background:var(--surface-2);border:1px solid var(--border-1);border-radius:var(--r-sm);padding:10px 12px">
+    <div style="font-size:9.5px;font-family:var(--font-mono);color:rgba(255,255,255,0.25);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">${label}</div>
+    <div style="font-size:12.5px;font-weight:600;color:rgba(255,255,255,0.8)">${value}</div>
+  </div>`;
+}
+
+// Expose switchFloor for HTML onclick
+window.switchFloor = switchFloor;
+window.openDeskModal = openDeskModal;
+window.closeModal = closeModal;
+window.openAddEmployeeModal = openAddEmployeeModal;
+window.submitEmployee = submitEmployee;
+window.deleteEmployee = deleteEmployee;
+window.openRoomModal = openRoomModal;
+window.bookDesk = bookDesk;
+window.releaseDesk = releaseDesk;
+window.bookRoom = bookRoom;
+window.releaseRoom = releaseRoom;
+window.registerVisitor = registerVisitor;
+window.printBadge = printBadge;
+window.openAddAssetModal = openAddAssetModal;
+window.submitAsset = submitAsset;
+window.submitAttendance = submitAttendance;
+window.submitLeave = submitLeave;
+window.closeCmd = closeCmd;
+window.navigateTo = navigateTo;

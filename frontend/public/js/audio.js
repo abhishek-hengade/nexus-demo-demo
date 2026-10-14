@@ -1,123 +1,90 @@
-// Web Audio API Synthesizer - Ultra-crisp UI Sound Effects (Zero external audio files required)
+// ═══════════════════════════════════════════════════════════════
+//  NexusOS Pro — Web Audio Synthesizer v3.0
+//  Zero external audio files. Pure sine/triangle oscillator tones.
+// ═══════════════════════════════════════════════════════════════
 
 class SoundFX {
   constructor() {
     this.enabled = localStorage.getItem('nexus_sound') !== 'false';
-    this.ctx = null;
+    this._ctx = null;
   }
 
-  init() {
-    if (!this.ctx && typeof window !== 'undefined') {
-      const AudioCtx = window.AudioContext || window.webkitAudioContext;
-      if (AudioCtx) {
-        this.ctx = new AudioCtx();
-      }
+  _getCtx() {
+    if (!this._ctx) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (AC) this._ctx = new AC();
     }
-    if (this.ctx && this.ctx.state === 'suspended') {
-      this.ctx.resume();
-    }
+    if (this._ctx?.state === 'suspended') this._ctx.resume();
+    return this._ctx;
+  }
+
+  _play(freq, type = 'sine', duration = 0.06, volume = 0.08, freqEnd) {
+    if (!this.enabled) return;
+    const ctx = this._getCtx();
+    if (!ctx) return;
+
+    const osc  = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const t    = ctx.currentTime;
+
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, t);
+    if (freqEnd) osc.frequency.exponentialRampToValueAtTime(freqEnd, t + duration);
+
+    gain.gain.setValueAtTime(volume, t);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + duration);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(t);
+    osc.stop(t + duration);
   }
 
   toggle() {
     this.enabled = !this.enabled;
     localStorage.setItem('nexus_sound', this.enabled ? 'true' : 'false');
-    if (this.enabled) this.playPop();
+    if (this.enabled) this.click();
     return this.enabled;
   }
 
-  // Gentle UI Click / Tap
-  playClick() {
-    if (!this.enabled) return;
-    this.init();
-    if (!this.ctx) return;
-
-    const osc = this.ctx.createOscillator();
-    const gain = this.ctx.createGain();
-
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(800, this.ctx.currentTime);
-    osc.frequency.exponentialRampToValueAtTime(400, this.ctx.currentTime + 0.04);
-
-    gain.gain.setValueAtTime(0.08, this.ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.04);
-
-    osc.connect(gain);
-    gain.connect(this.ctx.destination);
-
-    osc.start();
-    osc.stop(this.ctx.currentTime + 0.04);
+  // Subtle nav/tab click
+  click() {
+    this._play(900, 'sine', 0.045, 0.07, 500);
   }
 
-  // Soft Pop for Modals and Tabs
-  playPop() {
-    if (!this.enabled) return;
-    this.init();
-    if (!this.ctx) return;
-
-    const osc = this.ctx.createOscillator();
-    const gain = this.ctx.createGain();
-
-    osc.type = 'triangle';
-    osc.frequency.setValueAtTime(320, this.ctx.currentTime);
-    osc.frequency.exponentialRampToValueAtTime(640, this.ctx.currentTime + 0.06);
-
-    gain.gain.setValueAtTime(0.12, this.ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.06);
-
-    osc.connect(gain);
-    gain.connect(this.ctx.destination);
-
-    osc.start();
-    osc.stop(this.ctx.currentTime + 0.06);
+  // Confirmation pop
+  pop() {
+    this._play(360, 'triangle', 0.07, 0.1, 700);
   }
 
-  // Harmonic Chime for Booking / Approvals / Success
-  playSuccess() {
+  // Success chime (C–E–G arpeggio)
+  success() {
     if (!this.enabled) return;
-    this.init();
-    if (!this.ctx) return;
-
-    const notes = [523.25, 659.25, 783.99, 1046.50]; // C5, E5, G5, C6 arpeggio
-    notes.forEach((freq, idx) => {
-      const startTime = this.ctx.currentTime + idx * 0.07;
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
-
+    const ctx = this._getCtx();
+    if (!ctx) return;
+    [523.25, 659.25, 783.99].forEach((freq, i) => {
+      const osc  = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const t    = ctx.currentTime + i * 0.08;
       osc.type = 'sine';
-      osc.frequency.setValueAtTime(freq, startTime);
-
-      gain.gain.setValueAtTime(0.1, startTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.35);
-
+      osc.frequency.setValueAtTime(freq, t);
+      gain.gain.setValueAtTime(0.09, t);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.3);
       osc.connect(gain);
-      gain.connect(this.ctx.destination);
-
-      osc.start(startTime);
-      osc.stop(startTime + 0.35);
+      gain.connect(ctx.destination);
+      osc.start(t);
+      osc.stop(t + 0.3);
     });
   }
 
-  // Soft Warning / Notice
-  playWarning() {
-    if (!this.enabled) return;
-    this.init();
-    if (!this.ctx) return;
+  // Soft warning
+  warn() {
+    this._play(280, 'sawtooth', 0.18, 0.055, 220);
+  }
 
-    const osc = this.ctx.createOscillator();
-    const gain = this.ctx.createGain();
-
-    osc.type = 'sawtooth';
-    osc.frequency.setValueAtTime(260, this.ctx.currentTime);
-    osc.frequency.setValueAtTime(220, this.ctx.currentTime + 0.08);
-
-    gain.gain.setValueAtTime(0.06, this.ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.2);
-
-    osc.connect(gain);
-    gain.connect(this.ctx.destination);
-
-    osc.start();
-    osc.stop(this.ctx.currentTime + 0.2);
+  // Error buzz
+  error() {
+    this._play(180, 'square', 0.15, 0.04, 120);
   }
 }
 
