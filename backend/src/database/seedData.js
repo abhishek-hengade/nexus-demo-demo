@@ -1,0 +1,424 @@
+const seedData = {
+  announcements: [
+    {
+      id: "ann-1",
+      title: "Quarterly Town Hall & Product Roadmap 2026",
+      category: "Company",
+      content: "Join us this Friday at 4:00 PM IST in the Apex Boardroom or via Google Meet link.",
+      date: "2026-10-14",
+      author: "Sarah Jenkins (CEO)",
+      priority: "high"
+    },
+    {
+      id: "ann-2",
+      title: "Hybrid Work & Hot-Desking Policy Update",
+      category: "HR",
+      content: "Please ensure to check-in at your reserved desk before 10:30 AM to avoid auto-release.",
+      date: "2026-10-12",
+      author: "Marcus Rivera (Head of HR)",
+      priority: "medium"
+    },
+    {
+      id: "ann-3",
+      title: "New Ergonomic Keyboards & 4K Monitors In Stock",
+      category: "Facilities",
+      content: "Head over to the Office Supplies section to request upgraded hardware peripherals.",
+      date: "2026-10-10",
+      author: "Elena Rostov (Operations)",
+      priority: "low"
+    }
+  ],
+  employees: [
+    {
+      id: "emp-101",
+      name: "Abhishek Hengade",
+      email: "abhishek@nexusoffice.io",
+      role: "Lead Systems Architect",
+      department: "Engineering",
+      phone: "+91 98765 43210",
+      status: "In-Office",
+      avatar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
+      joinDate: "2023-04-15",
+      deskId: "D-101",
+      emergencyContact: "Anita Hengade (+91 98765 00000)"
+    },
+    {
+      id: "emp-102",
+      name: "Sarah Jenkins",
+      email: "sarah.j@nexusoffice.io",
+      role: "Chief Executive Officer",
+      department: "Executive",
+      phone: "+1 (555) 019-2834",
+      status: "In-Office",
+      avatar: "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150&auto=format&fit=crop&q=80",
+      joinDate: "2021-01-10",
+      deskId: "D-201",
+      emergencyContact: "David Jenkins (+1 555-9988)"
+    },
+    {
+      id: "emp-103",
+      name: "Aarav Sharma",
+      email: "aarav.s@nexusoffice.io",
+      role: "Senior Full-Stack Engineer",
+      department: "Engineering",
+      phone: "+91 98220 11223",
+      status: "In-Office",
+      avatar: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80",
+      joinDate: "2023-08-01",
+      deskId: "D-102",
+      emergencyContact: "Sunil Sharma (+91 98220 99887)"
+    },
+    {
+      id: "emp-104",
+      name: "Marcus Rivera",
+      email: "marcus.r@nexusoffice.io",
+      role: "Head of People & Culture",
+      department: "Human Resources",
+      phone: "+1 (555) 438-9921",
+      status: "Remote",
+      avatar: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80",
+      joinDate: "2022-03-12",
+      deskId: null,
+      emergencyContact: "Clara Rivera (+1 555-2233)"
+    },
+    {
+      id: "emp-105",
+      name: "Sophia Chen",
+      email: "sophia.c@nexusoffice.io",
+      role: "Lead UI/UX Product Designer",
+      department: "Design",
+      phone: "+1 (555) 762-1102",
+      status: "In-Office",
+      avatar: "https://images.unsplash.com/photo-1580489944761-15a19d654956?w=150&auto=format&fit=crop&q=80",
+      joinDate: "2022-11-20",
+      deskId: "D-105",
+      emergencyContact: "Kevin Chen (+1 555-4455)"
+    },
+    {
+      id: "emp-106",
+      name: "Vikram Malhotra",
+      email: "vikram.m@nexusoffice.io",
+      role: "DevOps & Cloud Specialist",
+      department: "Engineering",
+      phone: "+91 98900 44332",
+      status: "On Leave",
+      avatar: "https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=150&auto=format&fit=crop&q=80",
+      joinDate: "2024-02-15",
+      deskId: null,
+      emergencyContact: "Pooja Malhotra (+91 98900 88776)"
+    },
+    {
+      id: "emp-107",
+      name: "Elena Rostov",
+      email: "elena.r@nexusoffice.io",
+      role: "Office Operations Director",
+      department: "Operations",
+      phone: "+44 20 7946 0912",
+      status: "In-Office",
+      avatar: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=150&auto=format&fit=crop&q=80",
+      joinDate: "2022-06-01",
+      deskId: "D-202",
+      emergencyContact: "Alex Rostov (+44 20 7946 0001)"
+    },
+    {
+      id: "emp-108",
+      name: "Rohan Varma",
+      email: "rohan.v@nexusoffice.io",
+      role: "Product Manager",
+      department: "Product",
+      phone: "+91 91234 56789",
+      status: "Remote",
+      avatar: "https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?w=150&auto=format&fit=crop&q=80",
+      joinDate: "2023-09-10",
+      deskId: null,
+      emergencyContact: "Meera Varma (+91 91234 99999)"
+    }
+  ],
+  desks: [
+    // Floor 1 - Tech & Product Wing
+    { id: "D-101", floor: 1, section: "Tech Hub", number: 1, type: "Standing Desk", status: "Occupied", bookedBy: "Abhishek Hengade", bookedEmail: "abhishek@nexusoffice.io" },
+    { id: "D-102", floor: 1, section: "Tech Hub", number: 2, type: "Dual Monitor", status: "Occupied", bookedBy: "Aarav Sharma", bookedEmail: "aarav.s@nexusoffice.io" },
+    { id: "D-103", floor: 1, section: "Tech Hub", number: 3, type: "Standard Desk", status: "Available", bookedBy: null, bookedEmail: null },
+    { id: "D-104", floor: 1, section: "Tech Hub", number: 4, type: "Dual Monitor", status: "Available", bookedBy: null, bookedEmail: null },
+    { id: "D-105", floor: 1, section: "Design Pod", number: 5, type: "Studio Display", status: "Occupied", bookedBy: "Sophia Chen", bookedEmail: "sophia.c@nexusoffice.io" },
+    { id: "D-106", floor: 1, section: "Design Pod", number: 6, type: "Studio Display", status: "Available", bookedBy: null, bookedEmail: null },
+    { id: "D-107", floor: 1, section: "Product Alley", number: 7, type: "Standing Desk", status: "Reserved", bookedBy: "Rohan Varma", bookedEmail: "rohan.v@nexusoffice.io" },
+    { id: "D-108", floor: 1, section: "Product Alley", number: 8, type: "Standard Desk", status: "Available", bookedBy: null, bookedEmail: null },
+    { id: "D-109", floor: 1, section: "Quiet Zone", number: 9, type: "Noise Isolated", status: "Available", bookedBy: null, bookedEmail: null },
+    { id: "D-110", floor: 1, section: "Quiet Zone", number: 10, type: "Noise Isolated", status: "Under Maintenance", bookedBy: null, bookedEmail: null },
+
+    // Floor 2 - Executive & Operations Wing
+    { id: "D-201", floor: 2, section: "Executive Suite", number: 1, type: "Private Pod", status: "Occupied", bookedBy: "Sarah Jenkins", bookedEmail: "sarah.j@nexusoffice.io" },
+    { id: "D-202", floor: 2, section: "Operations Bay", number: 2, type: "Standard Desk", status: "Occupied", bookedBy: "Elena Rostov", bookedEmail: "elena.r@nexusoffice.io" },
+    { id: "D-203", floor: 2, section: "Operations Bay", number: 3, type: "Standard Desk", status: "Available", bookedBy: null, bookedEmail: null },
+    { id: "D-204", floor: 2, section: "People & HR", number: 4, type: "Standing Desk", status: "Available", bookedBy: null, bookedEmail: null },
+    { id: "D-205", floor: 2, section: "People & HR", number: 5, type: "Standard Desk", status: "Available", bookedBy: null, bookedEmail: null },
+    { id: "D-206", floor: 2, section: "Collaboration Lounge", number: 6, type: "High Table", status: "Available", bookedBy: null, bookedEmail: null },
+    { id: "D-207", floor: 2, section: "Collaboration Lounge", number: 7, type: "High Table", status: "Available", bookedBy: null, bookedEmail: null },
+    { id: "D-208", floor: 2, section: "Finance Corner", number: 8, type: "Dual Monitor", status: "Available", bookedBy: null, bookedEmail: null }
+  ],
+  meetingRooms: [
+    {
+      id: "room-1",
+      name: "Apex Boardroom",
+      floor: 2,
+      capacity: 18,
+      status: "Booked",
+      amenities: ["4K Dual Displays", "Cisco Webex Kit", "Glass Whiteboard", "Conference Phone", "Espresso Bar"],
+      currentBooking: {
+        title: "Executive Board Sync & Strategy",
+        bookedBy: "Sarah Jenkins",
+        startTime: "15:00",
+        endTime: "16:30"
+      }
+    },
+    {
+      id: "room-2",
+      name: "Silicon Studio",
+      floor: 1,
+      capacity: 8,
+      status: "Available",
+      amenities: ["75-inch TV", "4K Webcam", "Jabra Speaker", "Whiteboard"],
+      currentBooking: null
+    },
+    {
+      id: "room-3",
+      name: "Quantum Huddle",
+      floor: 1,
+      capacity: 4,
+      status: "Booked",
+      amenities: ["55-inch Monitor", "Wireless Screencast", "Whiteboard"],
+      currentBooking: {
+        title: "Sprint Planning & Tech Review",
+        bookedBy: "Abhishek Hengade",
+        startTime: "16:00",
+        endTime: "17:00"
+      }
+    },
+    {
+      id: "room-4",
+      name: "Design Oasis",
+      floor: 1,
+      capacity: 6,
+      status: "Available",
+      amenities: ["Color Calibrated 65\" Display", "Wacom Connect", "Magnetic Pinboards"],
+      currentBooking: null
+    },
+    {
+      id: "room-5",
+      name: "Orion Pod",
+      floor: 2,
+      capacity: 2,
+      status: "Available",
+      amenities: ["Acoustic Soundproofing", "Dual Monitors", "Air Purifier"],
+      currentBooking: null
+    }
+  ],
+  attendance: [
+    {
+      id: "att-001",
+      employeeId: "emp-101",
+      employeeName: "Abhishek Hengade",
+      date: "2026-10-14",
+      clockIn: "09:12 AM",
+      clockOut: null,
+      mode: "In-Office",
+      location: "Nexus HQ - Desk D-101",
+      workingHours: "Active"
+    },
+    {
+      id: "att-002",
+      employeeId: "emp-102",
+      employeeName: "Sarah Jenkins",
+      date: "2026-10-14",
+      clockIn: "08:45 AM",
+      clockOut: null,
+      mode: "In-Office",
+      location: "Executive Suite - Desk D-201",
+      workingHours: "Active"
+    },
+    {
+      id: "att-003",
+      employeeId: "emp-103",
+      employeeName: "Aarav Sharma",
+      date: "2026-10-14",
+      clockIn: "09:30 AM",
+      clockOut: null,
+      mode: "In-Office",
+      location: "Tech Hub - Desk D-102",
+      workingHours: "Active"
+    },
+    {
+      id: "att-004",
+      employeeId: "emp-104",
+      employeeName: "Marcus Rivera",
+      date: "2026-10-14",
+      clockIn: "10:00 AM",
+      clockOut: null,
+      mode: "Remote",
+      location: "San Francisco, CA (WFH)",
+      workingHours: "Active"
+    },
+    {
+      id: "att-005",
+      employeeId: "emp-105",
+      employeeName: "Sophia Chen",
+      date: "2026-10-14",
+      clockIn: "09:20 AM",
+      clockOut: null,
+      mode: "In-Office",
+      location: "Design Pod - Desk D-105",
+      workingHours: "Active"
+    },
+    {
+      id: "att-006",
+      employeeId: "emp-107",
+      employeeName: "Elena Rostov",
+      date: "2026-10-14",
+      clockIn: "08:50 AM",
+      clockOut: null,
+      mode: "In-Office",
+      location: "Operations Bay - Desk D-202",
+      workingHours: "Active"
+    }
+  ],
+  leaveRequests: [
+    {
+      id: "lv-001",
+      employeeId: "emp-106",
+      employeeName: "Vikram Malhotra",
+      department: "Engineering",
+      leaveType: "Annual Vacation",
+      startDate: "2026-10-14",
+      endDate: "2026-10-18",
+      days: 5,
+      reason: "Family trip and personal time off",
+      status: "Approved",
+      appliedOn: "2026-10-05",
+      reviewer: "Marcus Rivera"
+    },
+    {
+      id: "lv-002",
+      employeeId: "emp-108",
+      employeeName: "Rohan Varma",
+      department: "Product",
+      leaveType: "Sick Leave",
+      startDate: "2026-10-16",
+      endDate: "2026-10-16",
+      days: 1,
+      reason: "Routine medical checkup",
+      status: "Pending",
+      appliedOn: "2026-10-13",
+      reviewer: null
+    },
+    {
+      id: "lv-003",
+      employeeId: "emp-103",
+      employeeName: "Aarav Sharma",
+      department: "Engineering",
+      leaveType: "Work From Home (WFH)",
+      startDate: "2026-10-17",
+      endDate: "2026-10-17",
+      days: 1,
+      reason: "Home internet fiber maintenance",
+      status: "Pending",
+      appliedOn: "2026-10-14",
+      reviewer: null
+    }
+  ],
+  visitors: [
+    {
+      id: "vis-101",
+      name: "Karan Patel",
+      company: "Google Cloud Platform",
+      hostEmployee: "Abhishek Hengade",
+      purpose: "Enterprise Architecture Review",
+      date: "2026-10-14",
+      checkInTime: "10:15 AM",
+      checkOutTime: null,
+      badgeNumber: "VIS-9482",
+      status: "Checked-In",
+      ndaSigned: true
+    },
+    {
+      id: "vis-102",
+      name: "Rachel Green",
+      company: "Venture Global Partners",
+      hostEmployee: "Sarah Jenkins",
+      purpose: "Series B Investment Briefing",
+      date: "2026-10-14",
+      checkInTime: "02:00 PM",
+      checkOutTime: null,
+      badgeNumber: "VIS-9483",
+      status: "Checked-In",
+      ndaSigned: true
+    },
+    {
+      id: "vis-103",
+      name: "Devon Miles",
+      company: "Dell Technologies",
+      hostEmployee: "Elena Rostov",
+      purpose: "Server Rack Delivery & Setup",
+      date: "2026-10-14",
+      checkInTime: null,
+      checkOutTime: null,
+      badgeNumber: "VIS-9484",
+      status: "Expected",
+      ndaSigned: false
+    }
+  ],
+  assets: [
+    {
+      id: "ast-1",
+      name: "Apple MacBook Pro 16\" M3 Max",
+      category: "Laptops",
+      serialNumber: "MBP-2026-9041",
+      assignedTo: "Abhishek Hengade",
+      status: "In Use",
+      condition: "Excellent",
+      purchaseDate: "2024-03-01"
+    },
+    {
+      id: "ast-2",
+      name: "Dell UltraSharp 32\" 4K USB-C Hub Monitor",
+      category: "Peripherals",
+      serialNumber: "DEL-4K-1120",
+      assignedTo: "Aarav Sharma",
+      status: "In Use",
+      condition: "Good",
+      purchaseDate: "2023-08-15"
+    },
+    {
+      id: "ast-3",
+      name: "Herman Miller Aeron Ergonomic Chair",
+      category: "Furniture",
+      serialNumber: "HM-AER-4821",
+      assignedTo: "Sarah Jenkins",
+      status: "In Use",
+      condition: "Excellent",
+      purchaseDate: "2022-02-10"
+    },
+    {
+      id: "ast-4",
+      name: "Logitech MX Master 3S Mouse + Keys Combo",
+      category: "Peripherals",
+      serialNumber: "LOG-MX-8890",
+      assignedTo: null,
+      status: "In Stock",
+      condition: "Brand New",
+      purchaseDate: "2026-01-20"
+    },
+    {
+      id: "ast-5",
+      name: "Sony WH-1000XM5 ANC Headset",
+      category: "Audio",
+      serialNumber: "SNY-XM5-3129",
+      assignedTo: null,
+      status: "In Stock",
+      condition: "Brand New",
+      purchaseDate: "2026-02-14"
+    }
+  ]
+};
+
+module.exports = seedData;

@@ -1,0 +1,34 @@
+{
+  "name": "nexus-office-management",
+  "version": "1.0.0",
+  "description": "Next-Gen Intelligent Office & Workspace Management Platform with Floor Planning, Meeting Rooms, Hot-Desking, Attendance, and Visitor Tracking.",
+  "main": "src/server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node --test tests/api.test.js"
+  },
+  "keywords": [
+    "office-management",
+    "hot-desking",
+    "workspace-management",
+    "meeting-rooms",
+    "attendance-tracking",
+    "visitor-management",
+    "express",
+    "fullstack"
+  ],
+  "author": "Nexus Office Team",
+  "license": "MIT",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "morgan": "^1.10.0"
+  },
+  "devDependencies": {},
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
